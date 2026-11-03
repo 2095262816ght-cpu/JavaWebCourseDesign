@@ -12,14 +12,50 @@
           <router-link to="/" class="nav-item">商城首页</router-link>
           <span class="nav-item disabled">商品中心</span>
           <span class="nav-item disabled">品牌分类</span>
-          <router-link to="/admin" class="nav-item admin-link">管理后台</router-link>
+          <router-link v-if="userStore.isAdmin" to="/admin" class="nav-item admin-link">
+            管理后台
+          </router-link>
         </nav>
 
         <div class="header-actions">
           <el-badge :value="0" class="cart-badge">
             <el-button circle :icon="ShoppingCart" />
           </el-badge>
-          <el-button type="primary" size="default" round>登录 / 注册</el-button>
+
+          <!-- Logged in state -->
+          <template v-if="userStore.isLoggedIn">
+            <el-dropdown trigger="click">
+              <div class="user-info-btn">
+                <el-avatar :size="32" :src="userStore.userAvatar" />
+                <span class="user-nickname">{{ userStore.displayName }}</span>
+                <el-icon><ArrowDown /></el-icon>
+              </div>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item v-if="userStore.isAdmin" @click="$router.push('/admin')">
+                    <el-icon><Platform /></el-icon>
+                    <span>管理控制台</span>
+                  </el-dropdown-item>
+                  <el-dropdown-item divided @click="handleLogout">
+                    <el-icon><SwitchButton /></el-icon>
+                    <span>退出登录</span>
+                  </el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
+          </template>
+
+          <!-- Not logged in -->
+          <template v-else>
+            <el-button
+              type="primary"
+              size="default"
+              round
+              @click="$router.push('/login')"
+            >
+              登录 / 注册
+            </el-button>
+          </template>
         </div>
       </div>
     </header>
@@ -40,7 +76,19 @@
 </template>
 
 <script setup lang="ts">
-import { Shop, ShoppingCart } from '@element-plus/icons-vue'
+import { useRouter } from 'vue-router'
+import { Shop, ShoppingCart, ArrowDown, Platform, SwitchButton } from '@element-plus/icons-vue'
+import { ElMessage } from 'element-plus'
+import { useUserStore } from '@/stores/user'
+
+const router = useRouter()
+const userStore = useUserStore()
+
+async function handleLogout() {
+  await userStore.logout()
+  ElMessage.success('已安全退出登录')
+  router.push('/')
+}
 </script>
 
 <style scoped>
@@ -106,6 +154,7 @@ import { Shop, ShoppingCart } from '@element-plus/icons-vue'
 
 .nav-item.admin-link {
   color: #e6a23c;
+  font-weight: 600;
 }
 
 .nav-item.disabled {
@@ -117,6 +166,26 @@ import { Shop, ShoppingCart } from '@element-plus/icons-vue'
   display: flex;
   align-items: center;
   gap: 16px;
+}
+
+.user-info-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 20px;
+  transition: background-color 0.2s;
+}
+
+.user-info-btn:hover {
+  background-color: #f3f4f6;
+}
+
+.user-nickname {
+  font-size: 14px;
+  font-weight: 500;
+  color: #374151;
 }
 
 .portal-main {

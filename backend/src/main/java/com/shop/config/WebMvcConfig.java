@@ -56,7 +56,9 @@ public class WebMvcConfig implements WebMvcConfigurer {
         registry.addInterceptor(new SaInterceptor(handle -> {
             // Admin management routes require ROLE_ADMIN
             SaRouter.match("/api/admin/**", r -> StpUtil.checkRole("ROLE_ADMIN"));
-            // User cart & order routes require authentication
+            // Authenticated user actions
+            SaRouter.match("/api/auth/profile", r -> StpUtil.checkLogin());
+            SaRouter.match("/api/auth/logout", r -> StpUtil.checkLogin());
             SaRouter.match("/api/cart/**", r -> StpUtil.checkLogin());
             SaRouter.match("/api/orders/**", r -> StpUtil.checkLogin());
         })).addPathPatterns("/**")

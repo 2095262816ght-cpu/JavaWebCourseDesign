@@ -52,12 +52,15 @@
       <template #header>
         <div class="card-header">
           <span class="title">商城平台已就绪</span>
-          <el-tag type="success">Ticket 0001 已交付</el-tag>
+          <div class="tags">
+            <el-tag type="success">Ticket 0001 脚手架已交付</el-tag>
+            <el-tag type="primary">Ticket 0002 认证与用户管理已交付</el-tag>
+          </div>
         </div>
       </template>
       <div class="status-content">
-        <p>前后端统一架构已就绪：Spring Boot 3.3 + Sa-Token + MyBatis-Plus + Vue 3 + Pinia + Element Plus。</p>
-        <p>本地 MySQL 8.4 数据库及 Docker Redis 缓存已连接成功，数据表结构已完成初始化。</p>
+        <p>前后端统一架构已就绪：Spring Boot 3.3 + Sa-Token (JWT) + MyBatis-Plus + Vue 3 + Pinia + Element Plus。</p>
+        <p>用户认证与权限管理已交付：支持顾客注册登录、管理员 RBAC 鉴权拦截、BCrypt 密码加密、用户中心及管理后台用户启停控制。</p>
       </div>
     </el-card>
   </div>

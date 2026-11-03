@@ -41,15 +41,15 @@
       </el-col>
 
       <el-col :span="6">
-        <el-card shadow="hover">
+        <el-card shadow="hover" class="clickable-card" @click="$router.push('/admin/users')">
           <template #header>
             <div class="card-header">
               <span>注册用户</span>
-              <el-tag type="info">总计</el-tag>
+              <el-tag type="info">用户管理</el-tag>
             </div>
           </template>
-          <div class="card-value">2 位</div>
-          <div class="card-footer">新增用户 +1</div>
+          <div class="card-value">{{ userCount !== null ? `${userCount} 位` : '加载中...' }}</div>
+          <div class="card-footer">点击前往用户管理列表 →</div>
         </el-card>
       </el-col>
     </el-row>
@@ -75,7 +75,23 @@
 </template>
 
 <script setup lang="ts">
-// Admin Dashboard overview
+import { ref, onMounted } from 'vue'
+import { getAdminUsersApi } from '@/api/user'
+
+const userCount = ref<number | null>(null)
+
+async function fetchStats() {
+  try {
+    const res = await getAdminUsersApi({ page: 1, size: 1 })
+    userCount.value = res.total
+  } catch {
+    userCount.value = null
+  }
+}
+
+onMounted(() => {
+  fetchStats()
+})
 </script>
 
 <style scoped>
@@ -85,6 +101,15 @@
 
 .stat-cards {
   margin-bottom: 24px;
+}
+
+.clickable-card {
+  cursor: pointer;
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.clickable-card:hover {
+  transform: translateY(-2px);
 }
 
 .card-header {

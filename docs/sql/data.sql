@@ -11,7 +11,7 @@ SET NAMES utf8mb4;
 -- --------------------------------------------------------
 DELETE FROM `sys_user`;
 INSERT INTO `sys_user` (`id`, `username`, `password`, `nickname`, `avatar`, `role`, `status`) VALUES
-(1, 'admin', '$2a$10$P1w6kX2b0jT.aZ1X0Y8C3u4O1r6s9V2K3e4O1r6s9V2K3e4O1r6s9', '平台超级管理员', 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&h=200&fit=crop', 'ROLE_ADMIN', 1),
+(1, 'admin', '$2a$10$7W6pZavnkFW5AgosezBYnOx3i.15aTEg8o3jNELhKL/OC1oEbI.jK', '平台超级管理员', 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&h=200&fit=crop', 'ROLE_ADMIN', 1),
 (2, 'customer', '$2a$10$N.zmdr9k7uOCQb376NoUnuTJ8iAt6Z5EHsM8lE9lBOsl7iKTVKIUi', '演示顾客', 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=200&h=200&fit=crop', 'ROLE_CUSTOMER', 1);
 
 -- --------------------------------------------------------
