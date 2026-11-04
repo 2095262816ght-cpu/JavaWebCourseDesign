@@ -22,15 +22,15 @@
           </el-menu-item>
           <el-menu-item index="/admin/users">
             <el-icon><User /></el-icon>
-            <span>用户管理 (T0002)</span>
+            <span>用户管理</span>
           </el-menu-item>
-          <el-menu-item index="/admin/brands" disabled>
+          <el-menu-item index="/admin/brands">
             <el-icon><CollectionTag /></el-icon>
-            <span>品牌管理 (T0003)</span>
+            <span>品牌管理</span>
           </el-menu-item>
-          <el-menu-item index="/admin/categories" disabled>
+          <el-menu-item index="/admin/categories">
             <el-icon><Menu /></el-icon>
-            <span>分类管理 (T0003)</span>
+            <span>分类管理</span>
           </el-menu-item>
           <el-menu-item index="/admin/products" disabled>
             <el-icon><Goods /></el-icon>

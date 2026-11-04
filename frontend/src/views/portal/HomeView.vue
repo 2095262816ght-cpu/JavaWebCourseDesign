@@ -1,6 +1,6 @@
 <template>
   <div class="home-container">
-    <!-- Hero Banner Skeleton -->
+    <!-- Hero Banner -->
     <div class="hero-section">
       <el-carousel height="380px" indicator-position="outside">
         <el-carousel-item v-for="(item, index) in banners" :key="index">
@@ -47,28 +47,103 @@
       </div>
     </div>
 
+    <!-- Category Taxonomy Section (T0003) -->
+    <div class="section-container" v-if="categories.length > 0">
+      <div class="section-header">
+        <div class="header-left">
+          <el-icon class="section-icon"><Menu /></el-icon>
+          <h3 class="section-title">全部分类导航</h3>
+          <span class="section-badge">多级层级树 · Redis 缓存加速</span>
+        </div>
+      </div>
+
+      <div class="category-grid">
+        <div
+          v-for="cat in categories"
+          :key="cat.id"
+          class="category-card"
+        >
+          <div class="category-card-header">
+            <span class="cat-name">{{ cat.name }}</span>
+            <el-tag size="small" type="primary" round>{{ cat.children?.length || 0 }} 个子分类</el-tag>
+          </div>
+          <div class="sub-category-list" v-if="cat.children && cat.children.length > 0">
+            <span
+              v-for="sub in cat.children"
+              :key="sub.id"
+              class="sub-cat-pill"
+            >
+              {{ sub.name }}
+            </span>
+          </div>
+          <div v-else class="empty-sub">暂无子分类</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Featured Brands Section (T0003) -->
+    <div class="section-container" v-if="featuredBrands.length > 0">
+      <div class="section-header">
+        <div class="header-left">
+          <el-icon class="section-icon"><CollectionTag /></el-icon>
+          <h3 class="section-title">热门甄选品牌</h3>
+          <span class="section-badge">官方旗舰店入驻 · Cache-Aside 缓存</span>
+        </div>
+      </div>
+
+      <div class="brand-grid">
+        <div
+          v-for="brand in featuredBrands"
+          :key="brand.id"
+          class="brand-card"
+        >
+          <div class="brand-logo-wrap">
+            <el-image
+              v-if="brand.logo"
+              :src="brand.logo"
+              fit="cover"
+              class="brand-img"
+            >
+              <template #error>
+                <div class="brand-fallback">{{ brand.name }}</div>
+              </template>
+            </el-image>
+            <div v-else class="brand-fallback">{{ brand.name }}</div>
+          </div>
+          <div class="brand-info">
+            <h4 class="brand-title">{{ brand.name }}</h4>
+            <p class="brand-desc">{{ brand.description || '官方直营正品旗舰店' }}</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- Welcome Content Box -->
     <el-card shadow="never" class="welcome-box">
       <template #header>
         <div class="card-header">
-          <span class="title">商城平台已就绪</span>
+          <span class="title">商城平台开发进度</span>
           <div class="tags">
-            <el-tag type="success">Ticket 0001 脚手架已交付</el-tag>
-            <el-tag type="primary">Ticket 0002 认证与用户管理已交付</el-tag>
+            <el-tag type="success">Ticket 0001 脚手架</el-tag>
+            <el-tag type="primary">Ticket 0002 认证与用户</el-tag>
+            <el-tag type="warning">Ticket 0003 品牌与分类</el-tag>
           </div>
         </div>
       </template>
       <div class="status-content">
-        <p>前后端统一架构已就绪：Spring Boot 3.3 + Sa-Token (JWT) + MyBatis-Plus + Vue 3 + Pinia + Element Plus。</p>
-        <p>用户认证与权限管理已交付：支持顾客注册登录、管理员 RBAC 鉴权拦截、BCrypt 密码加密、用户中心及管理后台用户启停控制。</p>
+        <p><strong>Ticket 0003 品牌与分类管理已就绪：</strong></p>
+        <p>• 后端：Deep CategoryService 纯函数 Stream 递归建树、Redis Cache-Aside 双写失效缓存；BrandService 多条件分页筛选与热门品牌推荐缓存。</p>
+        <p>• 前端：管理后台品牌管理（文件上传 Logo / 分页列表 / 增删改查）与分类管理（树形表格 / 无级添加子分类 / 递归删除拦截）。</p>
       </div>
     </el-card>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
-import { Van, Lightning, Service, Medal } from '@element-plus/icons-vue'
+import { ref, onMounted } from 'vue'
+import { Van, Lightning, Service, Medal, Menu, CollectionTag } from '@element-plus/icons-vue'
+import { getPortalCategoryTreeApi, type CategoryNode } from '@/api/category'
+import { getFeaturedBrandsApi, type Brand } from '@/api/brand'
 
 const banners = ref([
   {
@@ -87,6 +162,26 @@ const banners = ref([
     image: 'https://images.unsplash.com/photo-1517336714731-489689fd1ca8?w=1600&h=600&fit=crop'
   }
 ])
+
+const categories = ref<CategoryNode[]>([])
+const featuredBrands = ref<Brand[]>([])
+
+async function loadCatalogData() {
+  try {
+    const [cats, brands] = await Promise.all([
+      getPortalCategoryTreeApi(),
+      getFeaturedBrandsApi(6)
+    ])
+    categories.value = cats
+    featuredBrands.value = brands
+  } catch (err) {
+    console.error('加载前台类目与品牌失败', err)
+  }
+}
+
+onMounted(() => {
+  loadCatalogData()
+})
 </script>
 
 <style scoped>
@@ -170,6 +265,179 @@ const banners = ref([
   color: #6b7280;
 }
 
+/* Sections */
+.section-container {
+  margin-bottom: 32px;
+}
+
+.section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.section-icon {
+  font-size: 20px;
+  color: #409eff;
+}
+
+.section-title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  color: #111827;
+}
+
+.section-badge {
+  font-size: 12px;
+  color: #6b7280;
+  background: #f3f4f6;
+  padding: 2px 8px;
+  border-radius: 12px;
+  margin-left: 6px;
+}
+
+/* Category Grid */
+.category-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 16px;
+}
+
+.category-card {
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  padding: 16px;
+  transition: all 0.2s ease;
+}
+
+.category-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+  border-color: #bfdbfe;
+}
+
+.category-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.cat-name {
+  font-weight: 600;
+  font-size: 15px;
+  color: #1f2937;
+}
+
+.sub-category-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.sub-cat-pill {
+  font-size: 12px;
+  background: #f3f4f6;
+  color: #4b5563;
+  padding: 4px 10px;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.sub-cat-pill:hover {
+  background: #e0f2fe;
+  color: #0284c7;
+}
+
+.empty-sub {
+  font-size: 12px;
+  color: #9ca3af;
+}
+
+/* Brand Grid */
+.brand-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 16px;
+}
+
+.brand-card {
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  padding: 16px;
+  text-align: center;
+  transition: all 0.2s ease;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.brand-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+  border-color: #bfdbfe;
+}
+
+.brand-logo-wrap {
+  width: 72px;
+  height: 72px;
+  margin-bottom: 12px;
+}
+
+.brand-img {
+  width: 100%;
+  height: 100%;
+  border-radius: 8px;
+  border: 1px solid #f3f4f6;
+}
+
+.brand-fallback {
+  width: 100%;
+  height: 100%;
+  background: #f3f4f6;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  color: #6b7280;
+  font-weight: 600;
+}
+
+.brand-info {
+  width: 100%;
+}
+
+.brand-title {
+  margin: 0 0 4px 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: #1f2937;
+}
+
+.brand-desc {
+  margin: 0;
+  font-size: 12px;
+  color: #6b7280;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  line-height: 1.4;
+}
+
+/* Welcome Box */
 .welcome-box {
   border-radius: 12px;
 }
@@ -183,6 +451,11 @@ const banners = ref([
 .card-header .title {
   font-size: 18px;
   font-weight: 600;
+}
+
+.tags {
+  display: flex;
+  gap: 8px;
 }
 
 .status-content p {

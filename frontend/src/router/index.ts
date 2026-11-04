@@ -5,6 +5,8 @@ import AdminLayout from '@/layouts/AdminLayout.vue'
 import HomeView from '@/views/portal/HomeView.vue'
 import DashboardView from '@/views/admin/DashboardView.vue'
 import UserManagementView from '@/views/admin/UserManagementView.vue'
+import BrandManagementView from '@/views/admin/BrandManagementView.vue'
+import CategoryManagementView from '@/views/admin/CategoryManagementView.vue'
 import LoginView from '@/views/auth/LoginView.vue'
 import { useUserStore } from '@/stores/user'
 
@@ -39,6 +41,16 @@ const routes = [
         path: 'users',
         name: 'AdminUsers',
         component: UserManagementView
+      },
+      {
+        path: 'brands',
+        name: 'AdminBrands',
+        component: BrandManagementView
+      },
+      {
+        path: 'categories',
+        name: 'AdminCategories',
+        component: CategoryManagementView
       }
     ]
   }
