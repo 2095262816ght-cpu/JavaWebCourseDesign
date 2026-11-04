@@ -10,7 +10,7 @@
 
         <nav class="nav-links">
           <router-link to="/" class="nav-item">商城首页</router-link>
-          <span class="nav-item disabled">商品中心</span>
+          <router-link to="/products" class="nav-item">商品中心</router-link>
           <span class="nav-item disabled">品牌分类</span>
           <router-link v-if="userStore.isAdmin" to="/admin" class="nav-item admin-link">
             管理后台

@@ -32,9 +32,9 @@
             <el-icon><Menu /></el-icon>
             <span>分类管理</span>
           </el-menu-item>
-          <el-menu-item index="/admin/products" disabled>
+          <el-menu-item index="/admin/products">
             <el-icon><Goods /></el-icon>
-            <span>商品管理 (T0004)</span>
+            <span>商品管理</span>
           </el-menu-item>
           <el-menu-item index="/admin/orders" disabled>
             <el-icon><List /></el-icon>

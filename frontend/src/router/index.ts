@@ -7,6 +7,9 @@ import DashboardView from '@/views/admin/DashboardView.vue'
 import UserManagementView from '@/views/admin/UserManagementView.vue'
 import BrandManagementView from '@/views/admin/BrandManagementView.vue'
 import CategoryManagementView from '@/views/admin/CategoryManagementView.vue'
+import ProductManagementView from '@/views/admin/ProductManagementView.vue'
+import ProductListView from '@/views/portal/ProductListView.vue'
+import ProductDetailView from '@/views/portal/ProductDetailView.vue'
 import LoginView from '@/views/auth/LoginView.vue'
 import { useUserStore } from '@/stores/user'
 
@@ -19,6 +22,16 @@ const routes = [
         path: '',
         name: 'Home',
         component: HomeView
+      },
+      {
+        path: 'products',
+        name: 'ProductList',
+        component: ProductListView
+      },
+      {
+        path: 'product/:id',
+        name: 'ProductDetail',
+        component: ProductDetailView
       }
     ]
   },
@@ -51,6 +64,11 @@ const routes = [
         path: 'categories',
         name: 'AdminCategories',
         component: CategoryManagementView
+      },
+      {
+        path: 'products',
+        name: 'AdminProducts',
+        component: ProductManagementView
       }
     ]
   }
