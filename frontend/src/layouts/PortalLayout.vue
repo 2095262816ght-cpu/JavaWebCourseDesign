@@ -11,15 +11,25 @@
         <nav class="nav-links">
           <router-link to="/" class="nav-item">商城首页</router-link>
           <router-link to="/products" class="nav-item">商品中心</router-link>
-          <span class="nav-item disabled">品牌分类</span>
+          <router-link v-if="userStore.isLoggedIn" to="/orders" class="nav-item">
+            我的订单
+          </router-link>
           <router-link v-if="userStore.isAdmin" to="/admin" class="nav-item admin-link">
             管理后台
           </router-link>
         </nav>
 
         <div class="header-actions">
-          <el-badge :value="0" class="cart-badge">
-            <el-button circle :icon="ShoppingCart" />
+          <el-badge
+            :value="cartStore.cartCount"
+            :hidden="cartStore.cartCount === 0"
+            class="cart-badge"
+          >
+            <el-button
+              circle
+              :icon="ShoppingCart"
+              @click="$router.push('/cart')"
+            />
           </el-badge>
 
           <!-- Logged in state -->
@@ -32,7 +42,15 @@
               </div>
               <template #dropdown>
                 <el-dropdown-menu>
-                  <el-dropdown-item v-if="userStore.isAdmin" @click="$router.push('/admin')">
+                  <el-dropdown-item @click="$router.push('/cart')">
+                    <el-icon><ShoppingCart /></el-icon>
+                    <span>我的购物车 ({{ cartStore.cartCount }})</span>
+                  </el-dropdown-item>
+                  <el-dropdown-item @click="$router.push('/orders')">
+                    <el-icon><List /></el-icon>
+                    <span>我的订单</span>
+                  </el-dropdown-item>
+                  <el-dropdown-item v-if="userStore.isAdmin" divided @click="$router.push('/admin')">
                     <el-icon><Platform /></el-icon>
                     <span>管理控制台</span>
                   </el-dropdown-item>
@@ -76,16 +94,26 @@
 </template>
 
 <script setup lang="ts">
+import { onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { Shop, ShoppingCart, ArrowDown, Platform, SwitchButton } from '@element-plus/icons-vue'
+import { Shop, ShoppingCart, ArrowDown, Platform, SwitchButton, List } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { useUserStore } from '@/stores/user'
+import { useCartStore } from '@/stores/cart'
 
 const router = useRouter()
 const userStore = useUserStore()
+const cartStore = useCartStore()
+
+onMounted(() => {
+  if (userStore.isLoggedIn) {
+    cartStore.fetchCart().catch(() => {})
+  }
+})
 
 async function handleLogout() {
   await userStore.logout()
+  await cartStore.fetchCart().catch(() => {})
   ElMessage.success('已安全退出登录')
   router.push('/')
 }

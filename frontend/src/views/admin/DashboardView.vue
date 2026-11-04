@@ -15,15 +15,15 @@
       </el-col>
 
       <el-col :span="6">
-        <el-card shadow="hover">
+        <el-card shadow="hover" class="clickable-card" @click="$router.push('/admin/orders')">
           <template #header>
             <div class="card-header">
               <span>订单总量</span>
-              <el-tag type="primary">日统计</el-tag>
+              <el-tag type="primary">订单管理</el-tag>
             </div>
           </template>
-          <div class="card-value">128 单</div>
-          <div class="card-footer">完成率 94.2%</div>
+          <div class="card-value">{{ orderCount !== null ? `${orderCount} 单` : '实时监控' }}</div>
+          <div class="card-footer">点击前往订单管理列表 →</div>
         </el-card>
       </el-col>
 
@@ -77,15 +77,24 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { getAdminUsersApi } from '@/api/user'
+import { getAdminOrdersApi } from '@/api/order'
 
 const userCount = ref<number | null>(null)
+const orderCount = ref<number | null>(null)
 
 async function fetchStats() {
   try {
-    const res = await getAdminUsersApi({ page: 1, size: 1 })
-    userCount.value = res.total
+    const userRes = await getAdminUsersApi({ page: 1, size: 1 })
+    userCount.value = userRes.total
   } catch {
     userCount.value = null
+  }
+
+  try {
+    const orderRes = await getAdminOrdersApi({ pageNum: 1, pageSize: 1 })
+    orderCount.value = orderRes.total
+  } catch {
+    orderCount.value = null
   }
 }
 

@@ -10,6 +10,9 @@ import CategoryManagementView from '@/views/admin/CategoryManagementView.vue'
 import ProductManagementView from '@/views/admin/ProductManagementView.vue'
 import ProductListView from '@/views/portal/ProductListView.vue'
 import ProductDetailView from '@/views/portal/ProductDetailView.vue'
+import CartView from '@/views/portal/CartView.vue'
+import OrderHistoryView from '@/views/portal/OrderHistoryView.vue'
+import OrderManagementView from '@/views/admin/OrderManagementView.vue'
 import LoginView from '@/views/auth/LoginView.vue'
 import { useUserStore } from '@/stores/user'
 
@@ -32,6 +35,18 @@ const routes = [
         path: 'product/:id',
         name: 'ProductDetail',
         component: ProductDetailView
+      },
+      {
+        path: 'cart',
+        name: 'Cart',
+        component: CartView,
+        meta: { requiresAuth: true }
+      },
+      {
+        path: 'orders',
+        name: 'Orders',
+        component: OrderHistoryView,
+        meta: { requiresAuth: true }
       }
     ]
   },
@@ -69,6 +84,11 @@ const routes = [
         path: 'products',
         name: 'AdminProducts',
         component: ProductManagementView
+      },
+      {
+        path: 'orders',
+        name: 'AdminOrders',
+        component: OrderManagementView
       }
     ]
   }
@@ -91,7 +111,15 @@ router.beforeEach(async (to, _from, next) => {
     return next('/')
   }
 
-  // 2. 管理后台权限防护 (/admin/**)
+  // 2. 需登录权限页面保护 (如 /cart, /orders)
+  if (to.matched.some((record) => record.meta.requiresAuth)) {
+    if (!userStore.isLoggedIn) {
+      ElMessage.warning('该功能需要登录账号后操作，请先登录')
+      return next({ path: '/login', query: { redirect: to.fullPath } })
+    }
+  }
+
+  // 3. 管理后台权限防护 (/admin/**)
   if (to.matched.some((record) => record.meta.requiresAdmin)) {
     if (!userStore.isLoggedIn) {
       ElMessage.warning('请先登录管理员账号后再进入控制台')

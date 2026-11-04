@@ -192,7 +192,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import {
   ShoppingCart,
@@ -202,8 +202,13 @@ import {
   Finished
 } from '@element-plus/icons-vue'
 import { getProductDetailApi, type ProductDetail } from '@/api/product'
+import { useCartStore } from '@/stores/cart'
+import { useUserStore } from '@/stores/user'
 
 const route = useRoute()
+const router = useRouter()
+const cartStore = useCartStore()
+const userStore = useUserStore()
 
 const loading = ref(false)
 const product = ref<ProductDetail | null>(null)
@@ -245,14 +250,34 @@ async function fetchDetail() {
   }
 }
 
-function handleAddToCart() {
+async function handleAddToCart() {
   if (!product.value) return
-  ElMessage.success(`已成功将 ${quantity.value} 件【${product.value.name}】加入购物车`)
+  if (!userStore.isLoggedIn) {
+    ElMessage.warning('请先登录账号后再加购商品')
+    router.push({ path: '/login', query: { redirect: route.fullPath } })
+    return
+  }
+  try {
+    await cartStore.addToCart(product.value.id, quantity.value)
+    ElMessage.success(`已成功将 ${quantity.value} 件【${product.value.name}】加入购物车`)
+  } catch (err: any) {
+    ElMessage.error(err.message || '加入购物车失败')
+  }
 }
 
-function handleBuyNow() {
+async function handleBuyNow() {
   if (!product.value) return
-  ElMessage.info('订单结算功能将在 Ticket 0005 完整解锁，当前已准备就绪')
+  if (!userStore.isLoggedIn) {
+    ElMessage.warning('请先登录账号后再结算商品')
+    router.push({ path: '/login', query: { redirect: route.fullPath } })
+    return
+  }
+  try {
+    await cartStore.addToCart(product.value.id, quantity.value)
+    router.push('/cart')
+  } catch (err: any) {
+    ElMessage.error(err.message || '立即购买失败')
+  }
 }
 
 onMounted(() => {
