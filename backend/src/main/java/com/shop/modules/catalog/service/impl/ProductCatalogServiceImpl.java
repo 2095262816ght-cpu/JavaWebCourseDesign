@@ -2,7 +2,6 @@ package com.shop.modules.catalog.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
-import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.shop.common.exception.BusinessException;
 import com.shop.common.result.PageResult;
@@ -23,6 +22,7 @@ import com.shop.modules.catalog.mapper.ShopProductMapper;
 import com.shop.modules.catalog.service.BrandService;
 import com.shop.modules.catalog.service.CategoryService;
 import com.shop.modules.catalog.service.ProductCatalogService;
+import com.shop.modules.catalog.service.util.ProductImageHelper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -31,7 +31,6 @@ import org.springframework.util.StringUtils;
 
 import java.time.Duration;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -207,7 +206,7 @@ public class ProductCatalogServiceImpl implements ProductCatalogService {
         ShopBrand brand = product.getBrandId() != null ? brandMapper.selectById(product.getBrandId()) : null;
         ShopCategory category = product.getCategoryId() != null ? categoryMapper.selectById(product.getCategoryId()) : null;
 
-        List<String> subImages = parseSubImages(product.getMainImage(), product.getSubImages());
+        List<String> subImages = ProductImageHelper.parseGalleryImages(product.getMainImage(), product.getSubImages());
 
         ProductDetailVO detail = new ProductDetailVO(
                 product.getId(),
@@ -310,33 +309,5 @@ public class ProductCatalogServiceImpl implements ProductCatalogService {
                 p.getStock(),
                 p.getStatus()
         )).toList();
-    }
-
-    private List<String> parseSubImages(String mainImage, String rawSubImages) {
-        List<String> list = new ArrayList<>();
-        if (StringUtils.hasText(rawSubImages)) {
-            if (rawSubImages.startsWith("[") && rawSubImages.endsWith("]")) {
-                try {
-                    List<String> parsed = objectMapper.readValue(rawSubImages, new TypeReference<List<String>>() {});
-                    if (parsed != null) {
-                        list.addAll(parsed);
-                    }
-                } catch (Exception ignored) {
-                }
-            } else {
-                String[] parts = rawSubImages.split(",");
-                for (String part : parts) {
-                    if (StringUtils.hasText(part)) {
-                        list.add(part.trim());
-                    }
-                }
-            }
-        }
-
-        // 如果副图为空，至少保留主图供前台画廊展示
-        if (list.isEmpty() && StringUtils.hasText(mainImage)) {
-            list.add(mainImage);
-        }
-        return list;
     }
 }

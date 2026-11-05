@@ -16,6 +16,12 @@ import {
 } from '@/api/order'
 
 const CART_CACHE_KEY = 'shop_cart_cache'
+const EMPTY_CART: CartSummary = {
+  items: [],
+  totalItems: 0,
+  checkedCount: 0,
+  totalAmount: 0
+}
 
 function loadCachedCart(): CartSummary {
   const cached = localStorage.getItem(CART_CACHE_KEY)
@@ -26,12 +32,7 @@ function loadCachedCart(): CartSummary {
       // ignore
     }
   }
-  return {
-    items: [],
-    totalItems: 0,
-    checkedCount: 0,
-    totalAmount: 0
-  }
+  return { ...EMPTY_CART }
 }
 
 export const useCartStore = defineStore('cart', () => {
@@ -64,7 +65,7 @@ export const useCartStore = defineStore('cart', () => {
   async function fetchCart(): Promise<CartSummary> {
     const token = localStorage.getItem('token')
     if (!token) {
-      const empty: CartSummary = { items: [], totalItems: 0, checkedCount: 0, totalAmount: 0 }
+      const empty = { ...EMPTY_CART }
       saveCache(empty)
       return empty
     }
@@ -72,7 +73,7 @@ export const useCartStore = defineStore('cart', () => {
     loading.value = true
     try {
       const res = await getCartApi()
-      saveCache(res || { items: [], totalItems: 0, checkedCount: 0, totalAmount: 0 })
+      saveCache(res || { ...EMPTY_CART })
       return cartSummary.value
     } finally {
       loading.value = false
@@ -127,8 +128,7 @@ export const useCartStore = defineStore('cart', () => {
    */
   async function clearCart(): Promise<void> {
     await clearCartApi()
-    const empty: CartSummary = { items: [], totalItems: 0, checkedCount: 0, totalAmount: 0 }
-    saveCache(empty)
+    saveCache({ ...EMPTY_CART })
   }
 
   /**

@@ -50,7 +50,7 @@ public class CartServiceImpl implements CartService {
         List<Long> productIds = cartItems.stream()
                 .map(ShopCartItem::getProductId)
                 .distinct()
-                .collect(Collectors.toList());
+                .toList();
 
         List<ShopProduct> products = productMapper.selectBatchIds(productIds);
         Map<Long, ShopProduct> productMap = products.stream()
@@ -65,7 +65,7 @@ public class CartServiceImpl implements CartService {
             boolean isProductValid = product != null && product.getIsDeleted() == 0;
             BigDecimal price = (isProductValid && product.getPrice() != null) ? product.getPrice() : BigDecimal.ZERO;
             BigDecimal subtotal = price.multiply(BigDecimal.valueOf(item.getQuantity()));
-            boolean isChecked = item.getChecked() != null && item.getChecked() == 1;
+            boolean isChecked = Integer.valueOf(1).equals(item.getChecked());
 
             CartItemVO vo = new CartItemVO(
                     item.getId(),
@@ -109,22 +109,22 @@ public class CartServiceImpl implements CartService {
                 .eq(ShopCartItem::getProductId, cmd.getProductId());
         ShopCartItem existing = cartItemMapper.selectOne(queryWrapper);
 
+        int currentQty = existing != null ? existing.getQuantity() : 0;
+        int targetQty = currentQty + addQty;
+        if (targetQty > product.getStock()) {
+            String prefix = existing != null ? "加购数量" : "购买数量";
+            throw new BusinessException(prefix + "超过商品可用库存（当前库存：" + product.getStock() + " 件）");
+        }
+
         if (existing != null) {
-            int targetQty = existing.getQuantity() + addQty;
-            if (targetQty > product.getStock()) {
-                throw new BusinessException("加购数量超过商品可用库存（当前库存：" + product.getStock() + " 件）");
-            }
             existing.setQuantity(targetQty);
             existing.setChecked(1);
             cartItemMapper.updateById(existing);
         } else {
-            if (addQty > product.getStock()) {
-                throw new BusinessException("购买数量超过商品可用库存（当前库存：" + product.getStock() + " 件）");
-            }
             ShopCartItem newItem = new ShopCartItem();
             newItem.setUserId(userId);
             newItem.setProductId(cmd.getProductId());
-            newItem.setQuantity(addQty);
+            newItem.setQuantity(targetQty);
             newItem.setChecked(1);
             cartItemMapper.insert(newItem);
         }

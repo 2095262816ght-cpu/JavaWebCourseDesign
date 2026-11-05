@@ -2,8 +2,6 @@ package com.shop.modules.catalog.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
-import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.shop.common.exception.BusinessException;
 import com.shop.common.result.PageResult;
 import com.shop.common.result.ResultCode;
@@ -17,6 +15,7 @@ import com.shop.modules.catalog.mapper.ShopBrandMapper;
 import com.shop.modules.catalog.mapper.ShopCategoryMapper;
 import com.shop.modules.catalog.mapper.ShopProductMapper;
 import com.shop.modules.catalog.service.ProductAdminService;
+import com.shop.modules.catalog.service.util.ProductImageHelper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -24,8 +23,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
-import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -41,18 +38,15 @@ public class ProductAdminServiceImpl implements ProductAdminService {
     private final ShopBrandMapper brandMapper;
     private final ShopCategoryMapper categoryMapper;
     private final StringRedisTemplate redisTemplate;
-    private final ObjectMapper objectMapper;
 
     public ProductAdminServiceImpl(ShopProductMapper productMapper,
                                    ShopBrandMapper brandMapper,
                                    ShopCategoryMapper categoryMapper,
-                                   StringRedisTemplate redisTemplate,
-                                   ObjectMapper objectMapper) {
+                                   StringRedisTemplate redisTemplate) {
         this.productMapper = productMapper;
         this.brandMapper = brandMapper;
         this.categoryMapper = categoryMapper;
         this.redisTemplate = redisTemplate;
-        this.objectMapper = objectMapper;
     }
 
     @Override
@@ -74,54 +68,35 @@ public class ProductAdminServiceImpl implements ProductAdminService {
             throw new BusinessException(ResultCode.BAD_REQUEST.getCode(), "所选商品分类不存在 (ID: " + cmd.categoryId() + ")");
         }
 
-        // 3. 处理副图列表持久化格式 (逗号拼接)
-        String subImagesJoined = formatSubImages(cmd.subImages());
+        // 3. 构建或获取实体并统一赋值
+        boolean isNew = (cmd.id() == null);
+        ShopProduct product = isNew ? new ShopProduct() : productMapper.selectById(cmd.id());
+        if (product == null) {
+            throw new BusinessException(ResultCode.NOT_FOUND.getCode(), "目标商品不存在或已被删除");
+        }
 
-        Long productId;
-        if (cmd.id() == null) {
-            // 新增商品
-            ShopProduct product = new ShopProduct();
-            product.setName(cmd.name().trim());
-            product.setSubtitle(cmd.subtitle());
-            product.setBrandId(cmd.brandId());
-            product.setCategoryId(cmd.categoryId());
-            product.setMainImage(cmd.mainImage().trim());
-            product.setSubImages(subImagesJoined);
-            product.setPrice(cmd.price());
-            product.setOriginalPrice(cmd.originalPriceOrDefault());
-            product.setStock(cmd.stock());
-            product.setStatus(cmd.statusOrDefault());
-            product.setDetailHtml(cmd.detailHtml());
+        product.setName(cmd.name().trim());
+        product.setSubtitle(cmd.subtitle());
+        product.setBrandId(cmd.brandId());
+        product.setCategoryId(cmd.categoryId());
+        product.setMainImage(cmd.mainImage().trim());
+        product.setSubImages(ProductImageHelper.formatSubImages(cmd.subImages()));
+        product.setPrice(cmd.price());
+        product.setOriginalPrice(cmd.originalPriceOrDefault());
+        product.setStock(cmd.stock());
+        product.setStatus(cmd.statusOrDefault());
+        product.setDetailHtml(cmd.detailHtml());
 
+        if (isNew) {
             productMapper.insert(product);
-            productId = product.getId();
         } else {
-            // 更新商品
-            ShopProduct existing = productMapper.selectById(cmd.id());
-            if (existing == null) {
-                throw new BusinessException(ResultCode.NOT_FOUND.getCode(), "目标商品不存在或已被删除");
-            }
-
-            existing.setName(cmd.name().trim());
-            existing.setSubtitle(cmd.subtitle());
-            existing.setBrandId(cmd.brandId());
-            existing.setCategoryId(cmd.categoryId());
-            existing.setMainImage(cmd.mainImage().trim());
-            existing.setSubImages(subImagesJoined);
-            existing.setPrice(cmd.price());
-            existing.setOriginalPrice(cmd.originalPriceOrDefault());
-            existing.setStock(cmd.stock());
-            existing.setStatus(cmd.statusOrDefault());
-            existing.setDetailHtml(cmd.detailHtml());
-
-            productMapper.updateById(existing);
-            productId = existing.getId();
+            productMapper.updateById(product);
         }
 
         // 4. 清除相关 Redis 缓存 (Cache Invalidation)
-        evictProductCaches(productId);
+        evictProductCaches(product.getId());
 
-        return productId;
+        return product.getId();
     }
 
     @Override
@@ -194,7 +169,7 @@ public class ProductAdminServiceImpl implements ProductAdminService {
                 product.getName(),
                 product.getSubtitle(),
                 product.getMainImage(),
-                parseSubImages(product.getSubImages()),
+                ProductImageHelper.parseSubImages(product.getSubImages()),
                 product.getPrice(),
                 product.getOriginalPrice(),
                 product.getStock(),
@@ -223,44 +198,13 @@ public class ProductAdminServiceImpl implements ProductAdminService {
 
     private void evictProductCaches(Long productId) {
         try {
-            // 1. 失效首页聚合橱窗
             redisTemplate.delete(ProductCatalogServiceImpl.HOME_SHOWCASE_CACHE_KEY);
-            // 2. 失效商品详情缓存
             if (productId != null) {
                 redisTemplate.delete(ProductCatalogServiceImpl.PRODUCT_DETAIL_CACHE_PREFIX + productId);
             }
         } catch (Exception e) {
             log.warn("清除商品相关缓存异常: {}", e.getMessage());
         }
-    }
-
-    private String formatSubImages(List<String> list) {
-        if (list == null || list.isEmpty()) {
-            return null;
-        }
-        return list.stream()
-                .filter(StringUtils::hasText)
-                .map(String::trim)
-                .collect(Collectors.joining(","));
-    }
-
-    private List<String> parseSubImages(String rawSubImages) {
-        if (!StringUtils.hasText(rawSubImages)) {
-            return Collections.emptyList();
-        }
-        if (rawSubImages.startsWith("[") && rawSubImages.endsWith("]")) {
-            try {
-                List<String> parsed = objectMapper.readValue(rawSubImages, new TypeReference<List<String>>() {});
-                if (parsed != null) {
-                    return parsed;
-                }
-            } catch (Exception ignored) {
-            }
-        }
-        return Arrays.stream(rawSubImages.split(","))
-                .filter(StringUtils::hasText)
-                .map(String::trim)
-                .toList();
     }
 
     private List<ProductAdminVO> toAdminVOList(List<ShopProduct> products) {
@@ -286,7 +230,7 @@ public class ProductAdminServiceImpl implements ProductAdminService {
                 p.getName(),
                 p.getSubtitle(),
                 p.getMainImage(),
-                parseSubImages(p.getSubImages()),
+                ProductImageHelper.parseSubImages(p.getSubImages()),
                 p.getPrice(),
                 p.getOriginalPrice(),
                 p.getStock(),

@@ -37,6 +37,8 @@ import java.util.stream.Collectors;
 @Service
 public class OrderCheckoutServiceImpl implements OrderCheckoutService {
 
+    private static final DateTimeFormatter ORDER_NO_FORMATTER = DateTimeFormatter.ofPattern("yyyyMMddHHmmssSSS");
+
     private final ShopCartItemMapper cartItemMapper;
     private final ShopProductMapper productMapper;
     private final ShopOrderMapper orderMapper;
@@ -72,7 +74,7 @@ public class OrderCheckoutServiceImpl implements OrderCheckoutService {
         List<Long> productIds = cartItems.stream()
                 .map(ShopCartItem::getProductId)
                 .distinct()
-                .collect(Collectors.toList());
+                .toList();
 
         List<ShopProduct> products = productMapper.selectBatchIds(productIds);
         Map<Long, ShopProduct> productMap = products.stream()
@@ -129,7 +131,7 @@ public class OrderCheckoutServiceImpl implements OrderCheckoutService {
         }
 
         // 5. 结算成功后物理清空已勾选的购物车记录
-        List<Long> checkedCartIds = cartItems.stream().map(ShopCartItem::getId).collect(Collectors.toList());
+        List<Long> checkedCartIds = cartItems.stream().map(ShopCartItem::getId).toList();
         cartItemMapper.deleteBatchIds(checkedCartIds);
 
         return new OrderCheckoutResult(order.getId(), order.getOrderNo(), order.getTotalAmount(), order.getStatus());
@@ -210,7 +212,7 @@ public class OrderCheckoutServiceImpl implements OrderCheckoutService {
 
         List<OrderItemVO> itemVOList = items.stream()
                 .map(this::toOrderItemVO)
-                .collect(Collectors.toList());
+                .toList();
 
         return new OrderDetailVO(
                 order.getId(),
@@ -281,7 +283,7 @@ public class OrderCheckoutServiceImpl implements OrderCheckoutService {
     }
 
     private List<OrderSummaryVO> enrichOrdersWithItems(List<ShopOrder> orders) {
-        List<Long> orderIds = orders.stream().map(ShopOrder::getId).collect(Collectors.toList());
+        List<Long> orderIds = orders.stream().map(ShopOrder::getId).toList();
         LambdaQueryWrapper<ShopOrderItem> itemQuery = new LambdaQueryWrapper<>();
         itemQuery.in(ShopOrderItem::getOrderId, orderIds);
         List<ShopOrderItem> items = orderItemMapper.selectList(itemQuery);
@@ -328,7 +330,7 @@ public class OrderCheckoutServiceImpl implements OrderCheckoutService {
     }
 
     private String generateOrderNo() {
-        String timestamp = DateTimeFormatter.ofPattern("yyyyMMddHHmmssSSS").format(LocalDateTime.now());
+        String timestamp = ORDER_NO_FORMATTER.format(LocalDateTime.now());
         int randomSuffix = ThreadLocalRandom.current().nextInt(1000, 9999);
         return "ORD" + timestamp + randomSuffix;
     }

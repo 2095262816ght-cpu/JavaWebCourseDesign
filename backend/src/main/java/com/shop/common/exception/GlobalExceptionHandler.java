@@ -9,7 +9,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.validation.BindException;
 import org.springframework.validation.FieldError;
-import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
@@ -38,20 +37,12 @@ public class GlobalExceptionHandler {
         return Result.error(ResultCode.FORBIDDEN.getCode(), "权限不足，无法访问该资源");
     }
 
-    @ExceptionHandler(MethodArgumentNotValidException.class)
-    public Result<Void> handleValidationException(MethodArgumentNotValidException e) {
-        String msg = e.getBindingResult().getFieldErrors().stream()
-                .map(FieldError::getDefaultMessage)
-                .collect(Collectors.joining("; "));
-        log.warn("参数校验未通过: {}", msg);
-        return Result.error(ResultCode.BAD_REQUEST.getCode(), msg);
-    }
-
     @ExceptionHandler(BindException.class)
     public Result<Void> handleBindException(BindException e) {
         String msg = e.getFieldErrors().stream()
                 .map(FieldError::getDefaultMessage)
                 .collect(Collectors.joining("; "));
+        log.warn("参数校验未通过: {}", msg);
         return Result.error(ResultCode.BAD_REQUEST.getCode(), msg);
     }
 
