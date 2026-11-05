@@ -1,0 +1,77 @@
+# Production Configuration Profile
+server:
+  port: 8080
+  shutdown: graceful
+
+spring:
+  config:
+    activate:
+      on-profile: prod
+  application:
+    name: shop-backend
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql://${DB_HOST:shop-mysql}:${DB_PORT:3306}/${DB_NAME:shop_db}?useUnicode=true&characterEncoding=utf-8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
+    username: ${DB_USER:root}
+    password: ${DB_PASSWORD}
+    hikari:
+      minimum-idle: 10
+      maximum-pool-size: 30
+      idle-timeout: 30000
+      connection-timeout: 30000
+      max-lifetime: 1800000
+  data:
+    redis:
+      host: ${REDIS_HOST:shop-redis}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD}
+      timeout: 3000ms
+      lettuce:
+        pool:
+          max-active: 32
+          max-idle: 16
+          min-idle: 4
+  servlet:
+    multipart:
+      max-file-size: 10MB
+      max-request-size: 20MB
+
+# MyBatis-Plus: 关闭控制台标准输出 SQL，防止生产日志刷屏与敏感字段外泄
+mybatis-plus:
+  mapper-locations: classpath*:/mapper/**/*.xml
+  configuration:
+    map-underscore-to-camel-case: true
+    log-impl: org.apache.ibatis.logging.nologging.NoLoggingImpl
+  global-config:
+    db-config:
+      logic-delete-field: isDeleted
+      logic-delete-value: 1
+      logic-not-delete-value: 0
+
+# Sa-Token 生产配置 (Token 有效期 7 天)
+sa-token:
+  token-name: satoken
+  timeout: 604800
+  active-timeout: -1
+  is-concurrent: true
+  is-share: true
+  token-style: uuid
+  is-log: false
+
+# 生产环境文件存储持久化目录
+shop:
+  storage:
+    local-dir: /app/uploads
+    url-prefix: /uploads/
+
+# 生产环境日志输出到文件
+logging:
+  level:
+    root: INFO
+    com.shop: INFO
+  file:
+    name: /app/logs/shop-backend.log
+  logback:
+    rollingpolicy:
+      max-file-size: 20MB
+      max-history: 30

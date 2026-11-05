@@ -137,7 +137,7 @@ mvn test -Dtest=OrderConcurrencyTest
 
 ## 📚 课程答辩与核心原理系列讲义（Principles Lectures）
 
-为满足高校课程作业与毕业设计答辩对“讲清楚所用技术和原理”的严苛要求，本项目在 `docs/principles/` 目录下精心编撰了 7 篇全景深度技术讲义：
+为满足高校课程作业与毕业设计答辩对“讲清楚所用技术和原理”的严苛要求，本项目在 `docs/principles/` 目录下精心编撰了 9 篇全景深度技术讲义：
 
 | 讲义编号 | 文档链接与核心主题 | 核心涵盖考点 |
 | :--- | :--- | :--- |
@@ -148,6 +148,8 @@ mvn test -Dtest=OrderConcurrencyTest
 | **05** | [高并发库存防超卖原理与极简原子化设计](file:///D:/JavaWeb/docs/principles/05-concurrency-and-inventory-safety.md) | 电商四大扣减方案优劣对比、单 SQL 条件原子更新（Code Simplifier 哲学）、CountDownLatch 并发集成测试 |
 | **06** | [Vue 3 响应式原理、Vite ESM 极速构建与现代前端架构](file:///D:/JavaWeb/docs/principles/06-vue3-and-vite-modern-frontend.md) | ES6 Proxy vs. Object.defineProperty、WeakMap 依赖收集、Vite 原生 ESM 毫秒冷启动、Pinia 客户端响应式深模块 |
 | **07** | [课程答辩高频核心考问与满分应答秘籍](file:///D:/JavaWeb/docs/principles/07-course-defense-qa.md) | **Top 10 答辩高频核心考问全景解答**（含考官意图剖析、满分话术、源码类名行数引用） |
+| **08** | [项目安全防护体系与网络传输防御（答辩知识）](file:///D:/JavaWeb/docs/principles/08-defense-knowledge.md) | **8 维纵深防御体系**、BCrypt/IDOR 越权/单 SQL 原子防超卖、**HTTP vs. HTTPS 生产级 SSL 卸载架构**、答辩安全考问话术 |
+| **09** | [方案一生产环境安全部署与 Cloudflare 边缘防护实战](file:///D:/JavaWeb/docs/principles/09-scheme1-production-deployment-guide.md) | **Cloudflare 小黄云隐藏源站 IP**、15年 Origin CA 证书、**Nginx 访客真实 IP 还原与登录限流防爆破**、全栈容器隔离一键部署 |
 
 ---
 

@@ -1,0 +1,267 @@
+# 09 - 方案一生产环境安全部署与 Cloudflare 边缘防护实战指南
+> **Scheme 1 Production Deployment: Cloudflare Edge + Hardened Nginx + Containerized Isolation**
+>
+> 本文是电商平台课程作业与毕业设计核心技术讲义第 09 篇。面向实际公网上线运营与毕业设计演示，系统性落地**方案一（高性价比方案：云服务器单机 + 免费 Cloudflare CDN/WAF + Nginx 安全网关 + Docker 全栈隔离）**，提供手把手的一键部署实战与全链路安全加固细节。
+
+---
+
+## 目录速览
+
+- [1. 方案一生产架构与核心防御拓扑](#1-方案一生产架构与核心防御拓扑)
+- [2. 部署前准备与服务器端口全面收敛](#2-部署前准备与服务器端口全面收敛)
+- [3. 免费 Cloudflare 边缘安全防护配置（手把手）](#3-免费-cloudflare-边缘安全防护配置手把手)
+  - [3.1 域名接入与开启小黄云代理（隐藏真实 IP）](#31-域名接入与开启小黄云代理隐藏真实-ip)
+  - [3.2 生成 15 年免费 Origin CA 证书与 Full(Strict) 加密](#32-生成-15-年免费-origin-ca-证书与-fullstrict-加密)
+  - [3.3 开启边缘防刷与 WAF 基础规则](#33-开启边缘防刷与-waf-基础规则)
+- [4. 全栈容器化与数据隔离（Docker Compose）](#4-全栈容器化与数据隔离docker-compose)
+  - [4.1 核心服务内网收敛（零端口暴露原则）](#41-核心服务内网收敛零端口暴露原则)
+  - [4.2 敏感密码环境变量解耦（Zero Secret in Git）](#42-敏感密码环境变量解耦zero-secret-in-git)
+- [5. Nginx 边缘网关安全加固核心技术落地](#5-nginx-边缘网关安全加固核心技术落地)
+  - [5.1 还原访客真实 IP（CF-Connecting-IP 绑定）](#51-还原访客真实-ipcf-connecting-ip-绑定)
+  - [5.2 登录接口防暴破限流区（Rate Limiting）](#52-登录接口防暴破限流区rate-limiting)
+  - [5.3 全链路 HSTS 与安全响应头](#53-全链路-hsts-与安全响应头)
+- [6. 一键极速部署与持续运维手册](#6-一键极速部署与持续运维手册)
+- [7. 答辩发难反击：线上遭受恶意攻击如何防御？](#7-答辩发难反击线上遭受恶意攻击如何防御)
+
+---
+
+## 1. 方案一生产架构与核心防御拓扑
+
+方案一以极低的成本（仅需单台 2核4G 云服务器，月均几十元），借助现代化容器技术与全球顶级免费边缘网络构建了媲美大厂的立体防护架构：
+
+```mermaid
+flowchart TD
+    Internet["互联网访客 / 移动端 / 恶意黑客"]
+    
+    subgraph Edge ["Cloudflare 免费全球边缘网络 (Anycast)"]
+        CF_DNS["DNS 劫持解析 (隐藏源站真实 IP)"]
+        CF_WAF["免费 WAF 规则 + Bot Fight 自动人机识别"]
+        CF_DDoS["TB 级分布式流量清洗 (防 SYN Flood / UDP 放大)"]
+        CF_SSL["边缘权威 SSL 证书 (浏览器端绿锁)"]
+    end
+
+    subgraph Host ["单台云服务器 (Linux / Ubuntu 22.04 LTS)"]
+        Firewall["系统防火墙 (UFW / 安全组仅放行 80, 443, 2222)"]
+        
+        subgraph Gateway ["Nginx 1.27 安全边缘网关 (Docker)"]
+            OriginSSL["Cloudflare 15年 Origin CA 证书"]
+            RealIP["真实 IP 还原 (set_real_ip_from)"]
+            RateLimit["登录防爆破限流池 (limit_req 5r/s)"]
+            SecHeaders["HSTS + X-Frame-Options 安全响应头"]
+        end
+
+        subgraph PrivateNet ["Docker Bridge 隔离内网 (shop-internal-network)"]
+            Frontend["Vue 3 前端托管容器 (仅内网 80)"]
+            Backend["Spring Boot 3 后端容器 (非 root 用户, 仅内网 8080)"]
+            MySQL[("MySQL 8.4 容器 (零端口暴露, 仅内网 3306)")]
+            Redis[("Redis 7.2 容器 (强密码保护, 仅内网 6379)")]
+        end
+    end
+
+    Internet --> Edge
+    Edge -->|"公网 Full(Strict) TLS 加密链路"| Firewall
+    Firewall --> Gateway
+    Gateway -->|"静态资源代理"| Frontend
+    Gateway -->|"API 反向代理"| Backend
+    Backend --> MySQL
+    Backend --> Redis
+```
+
+---
+
+## 2. 部署前准备与服务器端口全面收敛
+
+在云厂商（如阿里云、腾讯云、华为云、AWS、轻量应用服务器）开通 Linux 主机后：
+
+### 2.1 安全组端口最小化开放原则
+很多初学者部署时习惯将所有端口（0~65535）全开，这是数据库被勒索病毒删库的最主要根源。**在云服务器安全组中，仅允许放行以下 3 个端口**：
+
+| 协议 | 外部端口 | 作用说明 | 限制条件 |
+| :--- | :--- | :--- | :--- |
+| **TCP** | `80` | HTTP 协议，用于引导 301 强跳至 HTTPS | 允许所有 IP (0.0.0.0/0) |
+| **TCP** | `443` | HTTPS 协议，系统唯一业务加密入口 | 允许所有 IP (0.0.0.0/0) |
+| **TCP** | `2222` | 自定义 SSH 运维端口（替代默认的 22 端口） | 建议绑定自己的固定 IP 或仅供管理运维 |
+
+> [!CAUTION]
+> **严禁开放 3306 和 6379 端口**！本项目数据库和缓存容器全部通过 Docker 内部桥接网络直连，根本不需要对外开放任何端口。
+
+---
+
+## 3. 免费 Cloudflare 边缘安全防护配置（手把手）
+
+### 3.1 域名接入与开启小黄云代理（隐藏真实 IP）
+1. 注册并登录 [Cloudflare](https://www.cloudflare.com/)；
+2. 添加你的域名（若没有域名，在阿里云/腾讯云购买一个几元钱的 `.top` 或 `.xyz` 域名即可）；
+3. 将域名的 DNS 服务器（NS 记录）按照提示修改为 Cloudflare 分配的 Nameserver；
+4. 进入 Cloudflare **DNS** 页面，添加解析记录：
+   - 类型：`A`
+   - 名称：`@`（或 `shop`）
+   - IPv4 地址：填写你云服务器的**真实公网 IP**
+   - **代理状态（Proxy Status）**：**必须勾选为“已代理（显示为橙色小黄云）”**！
+   > **安全效果**：此时全世界使用 `ping` 或 `nslookup` 探测你的域名，解析出的都是 Cloudflare 的高防节点 IP，**没有任何人能探测到你云主机的真实源站 IP**！
+
+---
+
+### 3.2 生成 15 年免费 Origin CA 证书与 Full(Strict) 加密
+1. 登录 Cloudflare -> 点击域名 -> **SSL/TLS** -> **源服务器（Origin Server）**；
+2. 点击 **创建证书（Create Certificate）**：
+   - 保持默认私钥类型（RSA 2048）；
+   - 主机名包含 `*.yourdomain.com` 和 `yourdomain.com`；
+   - 证书有效期选择 **15 年**；
+   - 点击“创建”；
+3. 将页面弹出的 **源证书** 文本完整复制，保存为服务器项目中的 `deploy/nginx/ssl/cert.pem`；
+4. 将页面弹出的 **私钥** 文本完整复制，保存为服务器项目中的 `deploy/nginx/ssl/key.pem`；
+5. 进入 Cloudflare -> **SSL/TLS 概览**，将加密模式勾选为 **完全（严格）/ Full (Strict)**。
+   > **安全效果**：访客到 Cloudflare 走公共 CA 绿锁证书；Cloudflare 到你的 Nginx 走 15 年私钥加密。两段全链路均为强加密通信，**且 15 年内永远无需担心证书过期**！
+
+---
+
+### 3.3 开启边缘防刷与 WAF 基础规则
+在 Cloudflare 控制台中一键开启：
+- **安全性 (Security)** -> **Bots**：开启 **Bot Fight Mode（Bot 战斗模式）**，自动拦截已知恶意爬虫和扫描器；
+- **安全性** -> **WAF** -> 页面规则：可以为 `/api/auth/login` 配置如果触发异常频次则弹发 Turnstile 人机验证码。
+
+---
+
+## 4. 全栈容器化与数据隔离（Docker Compose）
+
+本项目的生产配置文件全部集成在 `deploy/` 目录中：
+
+### 4.1 核心服务内网收敛（零端口暴露原则）
+在 [`deploy/docker-compose.prod.yml`](file:///D:/JavaWeb/deploy/docker-compose.prod.yml) 中：
+- `shop-mysql`、`shop-redis`、`shop-backend`、`shop-frontend` 四大服务容器：
+  - **全部未声明 `ports` 端口映射**！
+  - 统一加入命名网络 `shop-internal-network`；
+- 全站仅有 `shop-nginx` 声明了对外端口：
+  ```yaml
+  ports:
+    - "80:80"
+    - "443:443"
+  ```
+  外部流量只能从 Nginx 门面进入，内部网络完全处于黑暗森林状态。
+
+### 4.2 敏感密码环境变量解耦（Zero Secret in Git）
+代码仓库中坚决不保存明文生产密码。在 `deploy/` 目录下配套了 [`deploy/.env.example`](file:///D:/JavaWeb/deploy/.env.example)：
+```bash
+cp deploy/.env.example deploy/.env
+```
+在 `.env` 中填入你的自定义高强度随机密码：
+```properties
+DB_ROOT_PASSWORD=K8s_Shop_Prod_2026_Secure_Pass!
+DB_PASSWORD=K8s_Shop_Prod_2026_Secure_Pass!
+REDIS_PASSWORD=Shop_Prod_Redis_Token_2026!
+```
+Docker Compose 会在启动时自动读取 `.env`，无缝注入容器，彻底隔离生产凭据。
+
+---
+
+## 5. Nginx 边缘网关安全加固核心技术落地
+
+生产配置文件位于 [`deploy/nginx/nginx.conf`](file:///D:/JavaWeb/deploy/nginx/nginx.conf) 与 [`deploy/nginx/conf.d/shop.conf`](file:///D:/JavaWeb/deploy/nginx/conf.d/shop.conf)：
+
+### 5.1 还原访客真实 IP（CF-Connecting-IP 绑定）
+由于所有流量经过了 Cloudflare 代理，默认情况下 Nginx 拿到的 `$remote_addr` 全是 Cloudflare 的机房 IP。这会导致日志全是代理 IP、限流规则误伤所有正常访客。
+**我们在 `nginx.conf` 中精确植入了官方 CIDR 网段与重写声明**：
+```nginx
+set_real_ip_from 173.245.48.0/20;
+set_real_ip_from 103.21.244.0/22;
+# ... (涵盖全部 Cloudflare IPv4 与 IPv6 网段)
+real_ip_header CF-Connecting-IP;
+real_ip_recursive on;
+```
+Nginx 会自动从 HTTP Header `CF-Connecting-IP` 提取真正的客户端 IP 赋予 `$remote_addr`，使后续的日志分析与限流防刷精准生效！
+
+### 5.2 登录接口防暴破限流区（Rate Limiting）
+在 `shop.conf` 中针对高危接口配置独立限流保护：
+```nginx
+# 登录与注册：单 IP 每秒限制最多 5 次请求，超出排队 5 次，再超直接返回 HTTP 429
+location ~* ^/api/auth/(login|register)$ {
+    limit_req zone=login_limit burst=5 nodelay;
+    proxy_pass http://shop-backend:8080;
+    # ...
+}
+
+# 全局通用 API：单 IP 每秒限制 30 次请求
+location /api/ {
+    limit_req zone=api_limit burst=20 nodelay;
+    proxy_pass http://shop-backend:8080/api/;
+    # ...
+}
+```
+
+### 5.3 全链路 HSTS 与安全响应头
+在响应头中强制注入现代安全标准：
+```nginx
+add_header Strict-Transport-Security "max-age=31536000; includeSubDomains; preload" always;
+add_header X-Content-Type-Options "nosniff" always;
+add_header X-Frame-Options "SAMEORIGIN" always;
+add_header X-XSS-Protection "1; mode=block" always;
+add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+```
+
+---
+
+## 6. 一键极速部署与持续运维手册
+
+项目配套了全自动 Linux 部署脚本 [`deploy/scripts/deploy.sh`](file:///D:/JavaWeb/deploy/scripts/deploy.sh)。
+
+### 6.1 首次极速上线（仅需 3 步）
+
+在服务器终端中拉取代码后执行：
+```bash
+# 1. 进入部署脚本目录
+cd /var/www/JavaWeb/deploy/scripts
+
+# 2. 赋予执行权限并执行一键部署
+chmod +x deploy.sh
+./deploy.sh
+```
+脚本会自动完成：
+1. 检查 Docker 及 Docker Compose 环境；
+2. 若不存在 `.env` 则自动基于 `.env.example` 生成模板；
+3. 若无证书则自动生成自签名临时证书确保 Nginx 正常拉起；
+4. 编译后端 JDK 21 镜像与前端 Vue 3 构建镜像；
+5. 初始化 MySQL 表结构（`schema.sql`）与种子数据（`data.sql`）；
+6. 启动全栈 5 大隔离容器。
+
+---
+
+### 6.2 常见生产维护命令速查
+
+```bash
+# 进入部署目录
+cd deploy
+
+# 查看全栈 5 大容器的实时健康状态
+docker compose -f docker-compose.prod.yml ps
+
+# 查看 Spring Boot 后端实时滚动日志
+docker compose -f docker-compose.prod.yml logs -f shop-backend
+
+# 查看 Nginx 访问与限流拦截日志
+docker compose -f docker-compose.prod.yml logs -f shop-nginx
+
+# 代码更新后的无缝重新构建拉起
+git pull
+docker compose -f docker-compose.prod.yml up -d --build
+```
+
+---
+
+## 7. 答辩发难反击：线上遭受恶意攻击如何防御？
+
+### 考官发难 1：如果有人恶意攻击你们的线上服务器，尝试暴力破解管理员密码，你们怎么防？
+> **满分回答话术**：  
+> “老师，针对暴力破解，我们构建了多维纵深防线：  
+> 1. **边缘网关与真实 IP 内存限流**：所有外部流量必须经过 Nginx，我们配置了 `CF-Connecting-IP` 还原访客真实 IP，并在 Nginx 声明了专门针对 `/api/auth/login` 的限流池（`limit_req zone=login_limit rate=5r/s`），单 IP 每秒超过 5 次即刻返回 HTTP 429 熔断，从源头上废掉了黑客的高并发爆破脚本；  
+> 2. **密码学自适应计算耗时**：即便单线程尝试，我们后端采用的是 BCrypt 单向自适应哈希（迭代 1024 轮），单次密码校验需消耗 50~100ms 的 CPU 密集算力，让暴力枚举在物理算力成本上不可行；  
+> 3. **Cloudflare 边缘人机验证**：在更外层，Cloudflare 开启了 Bot Fight 模式，针对短时间频繁撞库的 IP 会直接下发 Turnstile 人机拼图挑战，直接阻断无头浏览器攻击。”
+
+---
+
+### 考官发难 2：数据库里存放着用户数据和订单资产，万一被黑客嗅探或扫描到端口直接脱库怎么办？
+> **满分回答话术**：  
+> “老师，在我们的方案一架构中，**数据库被公网直接扫描的概率为零**：  
+> 1. **端口绝对收敛**：在云服务器安全组中，我们仅对公网放行了 80 和 443 端口，MySQL（3306）和 Redis（6379）根本没有映射到宿主机公网；  
+> 2. **Docker 内网物理隔离**：数据库仅存在于 `shop-internal-network` 内部虚拟网络中，只有同样处于该网段的后端 Java 容器能够通过容器名 `shop-mysql` 发起内网通信，外网黑客连握手端口都探测不到；  
+> 3. **源站 IP 物理隐藏**：我们的域名配置在 Cloudflare 并开启了橙色小黄云代理，公网 DNS 无论如何查询都只能看到 Cloudflare 的高防 CDN 节点，黑客连我们云服务器的真实物理 IP 都无法定位，从根本上阻断了针对主机的直连攻击。”
