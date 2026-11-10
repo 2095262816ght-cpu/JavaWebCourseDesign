@@ -66,6 +66,7 @@ public class AdminBrandController {
         BrandCommand commandWithId = new BrandCommand(
                 id,
                 cmd.name(),
+                cmd.origin(),
                 cmd.logo(),
                 cmd.description(),
                 cmd.sort(),

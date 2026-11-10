@@ -55,7 +55,7 @@ sa-token:
   active-timeout: -1
   is-concurrent: true
   is-share: true
-  token-style: uuid
+  token-style: jwt
   is-log: false
 
 # 生产环境文件存储持久化目录

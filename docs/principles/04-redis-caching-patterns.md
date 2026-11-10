@@ -87,6 +87,25 @@ public List<BrandVO> getFeaturedBrands(int limit) {
 }
 ```
 
+### 1.3 分区分页缓存 Key 路由设计：防止分页碰撞与全量覆盖
+
+在品牌分页检索（[`BrandServiceImpl.listBrands`](file:///D:/JavaWeb/backend/src/main/java/com/shop/modules/catalog/service/impl/BrandServiceImpl.java)）中，不同客户端可能请求不同页面大小（如前台橱窗请求 `size=10`，特定筛选组件请求 `size=2` 或 `size=4`）。如果所有查询均共用一个缓存 Key，将产生严重的数据串页冲突。
+
+本项目采用**精细化分区缓存键策略**：
+1. **默认全量/首屏查询路由**：当且仅当满足默认条件（`page=1, size=10, kw="", status=null`）时，映射至固定 Key `catalog:brand:all`，提升高频首屏命中率；
+2. **带参/分页查询动态哈希**：当入参为非默认值时，动态构建分区键：
+   ```
+   catalog:brand:list:{page}:{size}:{keyword}:{status}
+   ```
+3. **分层全量主动淘汰**：当管理员执行品牌新增、编辑、删除操作时，深模块内部一键清理全量关联键：
+   ```java
+   private void evictBrandCaches() {
+       redisTemplate.delete(BRAND_ALL_CACHE_KEY);
+       evictKeysByPattern(BRAND_LIST_CACHE_PREFIX + "*");
+       evictKeysByPattern(BRAND_FEATURED_CACHE_PREFIX + "*");
+   }
+   ```
+
 ---
 
 ## 2. 缓存一致性深度剖析：为什么“淘汰缓存”优于“更新缓存”？
@@ -109,6 +128,68 @@ public List<BrandVO> getFeaturedBrands(int limit) {
 > **采用“淘汰缓存（Cache Invalidation）”的无可替代优势**：
 > 1. **消除并发覆盖竞争**：写操作只管执行 `DEL`，清空后不会产生乱序覆写；
 > 2. **避免无谓的无效计算**：如果某条数据连续被更新了 100 次，但期间没有任何用户来读，方案 A 徒劳无功地序列化和更新了 100 次缓存，而方案 B 仅做一次简单的标记清除，节省宝贵的服务端计算资源。
+
+### 2.2 事务内缓存淘汰的并发隐患与 Spring 事务同步双重淘汰（`afterCommit`）
+
+在电商交易下单结算扣减库存（[`OrderCheckoutServiceImpl.checkout`](file:///D:/JavaWeb/backend/src/main/java/com/shop/modules/commerce/service/impl/OrderCheckoutServiceImpl.java)）等带 `@Transactional` 事务的写链路中，单纯地在事务体内部执行一次 `redis.del()` 存在极其隐蔽的并发脏缓存风险：
+
+#### 1. 传统单次淘汰的并发时序隐患
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Trx as 事务写线程 A (checkout)
+    participant Reader as 并发读线程 B (getDetail)
+    participant DB as MySQL (可重复读 RR 隔离)
+    participant Redis as Redis 缓存
+
+    Trx->>DB: UPDATE 库存 stock = stock - 1 (行锁生效, 事务尚未提交)
+    Trx->>Redis: DEL catalog:product:detail:1 (事务内初次淘汰)
+    Note over Reader,Redis: 读线程 B 此时发起查询请求
+    Reader->>Redis: GET catalog:product:detail:1 (缓存未命中 Miss)
+    Reader->>DB: SELECT * FROM shop_product WHERE id = 1
+    Note over Reader,DB: 由于线程 A 事务尚未 COMMIT, MySQL RR 隔离使线程 B 只能读到未扣减前的旧快照！
+    DB-->>Reader: 返回旧库存数据 (如 stock = 100)
+    Reader->>Redis: SETEX catalog:product:detail:1 21600 旧库存(100) (脏数据回写！)
+    Trx->>DB: COMMIT 事务正式持久化提交
+    Note over DB,Redis: 最终灾难：DB 真实库存已扣为 99，但 Redis 中被回写了陈旧脏数据 100！
+```
+
+#### 2. 本项目解决方案：`TransactionSynchronizationManager.afterCommit` 双重淘汰
+针对上述并发竞态，本项目在 `OrderCheckoutServiceImpl` 中实现了**即时淘汰 + 事务提交后二次淘汰**的防御闭环：
+
+```java
+private void evictProductDetailCache(Long productId) {
+    if (productId == null || redisTemplate == null) {
+        return;
+    }
+    // 1. 事务内即时淘汰：避免当前线程后续逻辑或非事务读读取到旧缓存
+    doEvictProductDetailCache(productId);
+
+    // 2. 注册 Spring 事务同步钩子：当且仅当 MySQL 事务完全 commit 之后触发二次淘汰
+    if (TransactionSynchronizationManager.isSynchronizationActive()) {
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                doEvictProductDetailCache(productId);
+            }
+        });
+    }
+}
+
+private void doEvictProductDetailCache(Long productId) {
+    try {
+        redisTemplate.delete(ProductCatalogServiceImpl.PRODUCT_DETAIL_CACHE_PREFIX + productId);
+        redisTemplate.delete(ProductCatalogServiceImpl.HOME_SHOWCASE_CACHE_KEY);
+    } catch (Exception e) {
+        log.warn("扣减库存后清除商品详情缓存失败: productId={}, err={}", productId, e.getMessage());
+    }
+}
+```
+
+- **机制收益**：
+  - 即便并发读线程 B 在写事务提交前读取了旧快照并回写了 Redis，写线程 A 的事务在完成物理提交后，`afterCommit` 钩子会立即执行二次 `DEL`，将读线程 B 刚刚回写的陈旧缓存再度粉碎清理；
+  - 若事务因库存不足或异常发生回滚（Rollback），`afterCommit` 不会被调用，有效防止非必要的二次清理；
+  - 该机制在单体架构下无需引入复杂的 Canal MySQL Binlog 监听中间件，以极简代码优雅实现了生产级双写最终一致性！
 
 ---
 

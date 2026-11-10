@@ -20,6 +20,8 @@ public class ShopBrand implements Serializable {
 
     private String name;
 
+    private String origin;
+
     private String logo;
 
     private String description;
@@ -49,6 +51,16 @@ public class ShopBrand implements Serializable {
         this.status = status;
     }
 
+    public ShopBrand(Long id, String name, String origin, String logo, String description, Integer sort, Integer status) {
+        this.id = id;
+        this.name = name;
+        this.origin = origin;
+        this.logo = logo;
+        this.description = description;
+        this.sort = sort;
+        this.status = status;
+    }
+
     public Long getId() {
         return id;
     }
@@ -63,6 +75,14 @@ public class ShopBrand implements Serializable {
 
     public void setName(String name) {
         this.name = name;
+    }
+
+    public String getOrigin() {
+        return origin;
+    }
+
+    public void setOrigin(String origin) {
+        this.origin = origin;
     }
 
     public String getLogo() {

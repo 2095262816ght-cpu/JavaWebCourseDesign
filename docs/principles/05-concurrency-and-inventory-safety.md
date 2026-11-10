@@ -112,27 +112,72 @@ public interface ShopProductMapper extends BaseMapper<ShopProduct> {
 }
 ```
 
-#### 2. Service 事务协调与熔断回滚：`OrderCheckoutServiceImpl.java`
+#### 2. Service 事务协调、熔断回滚与缓存双重淘汰：`OrderCheckoutServiceImpl.java`
 ```java
 @Override
 @Transactional(rollbackFor = Exception.class)
-public OrderCheckoutResult checkout(Long userId, CheckoutCommand cmd) {
-    // ... 前置参数与购物车检索逻辑 ...
+public OrderCheckoutResult checkout(Long customerId, CheckoutCommand cmd) {
+    // 1. 批量加载购物车勾选行与关联商品 (ProductBatchLookupHelper 消除 N+1 查询)
+    List<ShopCartItem> cartItems = cartItemMapper.selectCheckedItemsByCustomerId(customerId);
+    Map<Long, ShopProduct> productMap = productBatchLookupHelper.lookupAndValidate(cartItems);
 
+    BigDecimal totalAmount = BigDecimal.ZERO;
     for (ShopCartItem item : cartItems) {
         ShopProduct product = productMap.get(item.getProductId());
         
-        // 单 SQL 原子条件扣减库存
+        // 单 SQL 原子条件扣减库存：InnoDB 行级排他锁由内核底层串行执行
         int affectedRows = productMapper.decrementStock(product.getId(), item.getQuantity());
         if (affectedRows == 0) {
             // 受影响行数为 0 表示库存不足，立即抛出受检业务异常
             // @Transactional 将自动回滚当前事务中的所有操作（包括已生成的订单记录和前置扣减）
             throw new BusinessException("商品 [" + product.getName() + "] 库存不足，扣减失败");
         }
-        // ... 生成快照与订单主表 ...
+
+        // 扣减成功后立即淘汰商品缓存，并注册 afterCommit 事务提交后二次淘汰钩子
+        evictProductDetailCache(product.getId());
+
+        // 委托充血实体计算行小计 (消除 Feature Envy 坏味道)
+        BigDecimal lineSubtotal = item.calculateSubtotal(product.getPrice());
+        totalAmount = totalAmount.add(lineSubtotal);
     }
+
+    // 3. 封装 DeliveryAddress 值对象并保存订单主表
+    ShopOrder order = new ShopOrder();
+    order.setOrderNo(generateOrderNo());
+    order.setCustomerId(customerId);
+    order.setTotalAmount(totalAmount);
+    order.setDeliveryAddress(cmd.getDeliveryAddress());
+    order.setStatus("UNPAID");
+    orderMapper.insert(order);
+
+    // 4. 生成订单项不可变价格与图片快照并保存
+    for (ShopCartItem item : cartItems) {
+        ShopProduct product = productMap.get(item.getProductId());
+        ShopOrderItem orderItem = new ShopOrderItem();
+        orderItem.setOrderId(order.getId());
+        orderItem.setOrderNo(order.getOrderNo());
+        orderItem.setProductId(product.getId());
+        orderItem.setProductName(product.getName());
+        orderItem.setProductImage(product.getMainImage());
+        orderItem.setUnitPrice(product.getPrice());
+        orderItem.setQuantity(item.getQuantity());
+        orderItem.setTotalPrice(orderItem.calculateSubtotal());
+        orderItemMapper.insert(orderItem);
+    }
+
+    // 5. 物理清空已勾选购物车条目
+    List<Long> checkedCartIds = cartItems.stream().map(ShopCartItem::getId).toList();
+    cartItemMapper.deleteBatchIds(checkedCartIds);
+
+    return new OrderCheckoutResult(order.getId(), order.getOrderNo(), order.getTotalAmount(), order.getStatus());
 }
 ```
+
+### 3.3 扣减库存与缓存双写一致性保障（Transactional Cache Eviction）
+
+在大流量秒杀场景中，除了数据库物理库存不能超卖，**缓存中的库存与详情展示也绝不能被污染**：
+- **即时失效**：单条商品库存一旦扣减成功，`evictProductDetailCache` 立即清除 Redis 中该商品的详情缓存（`catalog:product:detail:{id}`）与首页聚合橱窗（`catalog:product:showcase:home`）；
+- **事务提交后二次淘汰（`afterCommit`）**：在 Spring 事务管理器中注册 `TransactionSynchronization.afterCommit` 钩子。即使并发读线程在事务提交前从 MySQL 可重复读（RR）隔离快照中读取了旧数据并试图回写 Redis，在事务提交瞬间，该钩子会再度发起淘汰清理，彻底粉碎任何并发脏缓存。
 
 ---
 

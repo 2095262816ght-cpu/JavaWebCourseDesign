@@ -20,6 +20,9 @@ public record ProductDetailVO(
         @Schema(description = "品牌Logo", example = "https://...")
         String brandLogo,
 
+        @Schema(description = "品牌产地/国家", example = "美国加利福尼亚")
+        String brandOrigin,
+
         @Schema(description = "分类ID", example = "5")
         Long categoryId,
 
@@ -55,4 +58,12 @@ public record ProductDetailVO(
 
         @Schema(description = "创建时间")
         LocalDateTime createdAt
-) {}
+) {
+    public ProductDetailVO(Long id, Long brandId, String brandName, String brandLogo, Long categoryId,
+                           String categoryName, String name, String subtitle, String mainImage,
+                           List<String> subImages, BigDecimal price, BigDecimal originalPrice,
+                           Integer stock, Integer status, String detailHtml, LocalDateTime createdAt) {
+        this(id, brandId, brandName, brandLogo, null, categoryId, categoryName, name, subtitle,
+                mainImage, subImages, price, originalPrice, stock, status, detailHtml, createdAt);
+    }
+}

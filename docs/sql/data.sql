@@ -11,20 +11,20 @@ SET NAMES utf8mb4;
 -- --------------------------------------------------------
 DELETE FROM `sys_user`;
 INSERT INTO `sys_user` (`id`, `username`, `password`, `nickname`, `avatar`, `role`, `status`) VALUES
-(1, 'admin', '$2a$10$7W6pZavnkFW5AgosezBYnOx3i.15aTEg8o3jNELhKL/OC1oEbI.jK', '平台超级管理员', 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&h=200&fit=crop', 'ROLE_ADMIN', 1),
+(1, 'admin', '$2a$10$7W6pZavnkFW5AgosezBYnOx3i.15aTEg8o3jNELhKL/OC1oEbI.jK', '系统管理员', 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&h=200&fit=crop', 'ROLE_ADMIN', 1),
 (2, 'customer', '$2a$10$N.zmdr9k7uOCQb376NoUnuTJ8iAt6Z5EHsM8lE9lBOsl7iKTVKIUi', '演示顾客', 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=200&h=200&fit=crop', 'ROLE_CUSTOMER', 1);
 
 -- --------------------------------------------------------
 -- Brands
 -- --------------------------------------------------------
 DELETE FROM `shop_brand`;
-INSERT INTO `shop_brand` (`id`, `name`, `logo`, `description`, `sort`, `status`) VALUES
-(1, 'Apple', 'https://images.unsplash.com/photo-1611186871348-b1ce696e52c9?w=200&h=200&fit=crop', 'Apple 设计制造 iPhone、Mac、iPad 以及智能穿戴设备。', 1, 1),
-(2, 'Huawei', 'https://images.unsplash.com/photo-1580910051074-3eb694886505?w=200&h=200&fit=crop', '华为是全球领先的 ICT 与智能终端提供商，聚焦科技创新。', 2, 1),
-(3, 'Xiaomi', 'https://images.unsplash.com/photo-1511707171634-5f897ff02aa9?w=200&h=200&fit=crop', '小米，让全球每个人都能享受科技带来的美好生活。', 3, 1),
-(4, 'Sony', 'https://images.unsplash.com/photo-1546435770-a3e426bf472b?w=200&h=200&fit=crop', '索尼视听娱乐与影像科技，带来极致声音与视觉享受。', 4, 1),
-(5, 'Nike', 'https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=200&h=200&fit=crop', 'Nike，Just Do It。全球著名运动与跑步装备品牌。', 5, 1),
-(6, 'Uniqlo', 'https://images.unsplash.com/photo-1521572267360-ee0c2909d518?w=200&h=200&fit=crop', '优衣库 LifeWear，服适人生，简约而高品质的日常穿着。', 6, 1);
+INSERT INTO `shop_brand` (`id`, `name`, `origin`, `logo`, `description`, `sort`, `status`) VALUES
+(1, 'Apple', '美国加利福尼亚', 'https://images.unsplash.com/photo-1611186871348-b1ce696e52c9?w=200&h=200&fit=crop', 'Apple 设计制造 iPhone、Mac、iPad 以及智能穿戴设备。', 1, 1),
+(2, 'Huawei', '中国深圳', 'https://images.unsplash.com/photo-1580910051074-3eb694886505?w=200&h=200&fit=crop', '华为是全球领先的 ICT 与智能终端提供商，聚焦科技创新。', 2, 1),
+(3, 'Xiaomi', '中国北京', 'https://images.unsplash.com/photo-1511707171634-5f897ff02aa9?w=200&h=200&fit=crop', '小米，让全球每个人都能享受科技带来的美好生活。', 3, 1),
+(4, 'Sony', '日本东京', 'https://images.unsplash.com/photo-1546435770-a3e426bf472b?w=200&h=200&fit=crop', '索尼视听娱乐与影像科技，带来极致声音与视觉享受。', 4, 1),
+(5, 'Nike', '美国俄勒冈', 'https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=200&h=200&fit=crop', 'Nike，Just Do It。全球著名运动与跑步装备品牌。', 5, 1),
+(6, 'Uniqlo', '日本山口', 'https://images.unsplash.com/photo-1521572267360-ee0c2909d518?w=200&h=200&fit=crop', '优衣库 LifeWear，服适人生，简约而高品质的日常穿着。', 6, 1);
 
 -- --------------------------------------------------------
 -- Categories

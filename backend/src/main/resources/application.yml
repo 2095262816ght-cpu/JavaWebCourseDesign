@@ -49,7 +49,8 @@ sa-token:
   active-timeout: -1
   is-concurrent: true
   is-share: true
-  token-style: uuid
+  token-style: jwt
+  jwt-secret-key: shop-platform-jwt-secret-key-32chars-min-abcdef123456
   is-log: false
 
 # Custom Storage Configuration (Deep Seam)

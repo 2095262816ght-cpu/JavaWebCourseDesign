@@ -35,6 +35,7 @@ DROP TABLE IF EXISTS `shop_brand`;
 CREATE TABLE `shop_brand` (
   `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT 'Brand ID',
   `name` VARCHAR(64) NOT NULL COMMENT 'Brand Name',
+  `origin` VARCHAR(64) DEFAULT NULL COMMENT 'Brand Origin / Country',
   `logo` VARCHAR(255) DEFAULT NULL COMMENT 'Brand Logo URL',
   `description` VARCHAR(512) DEFAULT NULL COMMENT 'Brand Description',
   `sort` INT NOT NULL DEFAULT 0 COMMENT 'Display Order (Ascending)',

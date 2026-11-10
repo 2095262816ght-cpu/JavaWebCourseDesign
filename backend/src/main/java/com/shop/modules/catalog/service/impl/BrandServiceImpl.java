@@ -81,21 +81,40 @@ public class BrandServiceImpl implements BrandService {
         return result;
     }
 
+    public static final String BRAND_ALL_CACHE_KEY = "catalog:brand:all";
+    public static final String BRAND_LIST_CACHE_PREFIX = "catalog:brand:list:";
+
     @Override
     public PageResult<BrandVO> listBrands(BrandQuery query) {
-        int current = query.getPageOrDefault();
-        int size = query.getSizeOrDefault();
+        int current = query != null ? query.getPageOrDefault() : 1;
+        int size = query != null ? query.getSizeOrDefault() : 10;
+        String kw = (query != null && StringUtils.hasText(query.keyword())) ? query.keyword().trim() : "";
+        Integer status = query != null ? query.status() : null;
 
+        String cacheKey = (kw.isEmpty() && status == null && current == 1 && size == 10)
+                ? BRAND_ALL_CACHE_KEY
+                : BRAND_LIST_CACHE_PREFIX + current + ":" + size + ":" + kw + ":" + status;
+
+        // 1. 读取 Redis 缓存 (Cache-Aside 模式)
+        try {
+            String cachedJson = redisTemplate.opsForValue().get(cacheKey);
+            if (StringUtils.hasText(cachedJson)) {
+                return objectMapper.readValue(cachedJson, new TypeReference<PageResult<BrandVO>>() {});
+            }
+        } catch (Exception e) {
+            log.warn("Redis 读取品牌列表缓存异常，降级直查数据库: {}", e.getMessage());
+        }
+
+        // 2. 缓存未命中，回源 MySQL 查询
         Page<ShopBrand> pageParam = new Page<>(current, size);
         LambdaQueryWrapper<ShopBrand> wrapper = new LambdaQueryWrapper<>();
 
-        if (StringUtils.hasText(query.keyword())) {
-            String kw = query.keyword().trim();
+        if (!kw.isEmpty()) {
             wrapper.and(w -> w.like(ShopBrand::getName, kw).or().like(ShopBrand::getDescription, kw));
         }
 
-        if (query.status() != null) {
-            wrapper.eq(ShopBrand::getStatus, query.status());
+        if (status != null) {
+            wrapper.eq(ShopBrand::getStatus, status);
         }
 
         wrapper.orderByAsc(ShopBrand::getSort)
@@ -107,7 +126,17 @@ public class BrandServiceImpl implements BrandService {
                 .map(this::toVO)
                 .toList();
 
-        return PageResult.of(page.getCurrent(), page.getSize(), page.getTotal(), voList);
+        PageResult<BrandVO> result = PageResult.of(page.getCurrent(), page.getSize(), page.getTotal(), voList);
+
+        // 3. 回写 Redis
+        try {
+            String json = objectMapper.writeValueAsString(result);
+            redisTemplate.opsForValue().set(cacheKey, json, CACHE_TTL);
+        } catch (Exception e) {
+            log.warn("Redis 写入品牌列表缓存异常: {}", e.getMessage());
+        }
+
+        return result;
     }
 
     @Override
@@ -129,6 +158,7 @@ public class BrandServiceImpl implements BrandService {
                 throw new BusinessException(ResultCode.NOT_FOUND.getCode(), "目标品牌不存在或已被删除");
             }
             existing.setName(cmd.name());
+            existing.setOrigin(cmd.origin());
             existing.setLogo(cmd.logo());
             existing.setDescription(cmd.description());
             existing.setSort(cmd.sortOrDefault());
@@ -138,6 +168,7 @@ public class BrandServiceImpl implements BrandService {
             // 新增品牌
             ShopBrand brand = new ShopBrand();
             brand.setName(cmd.name());
+            brand.setOrigin(cmd.origin());
             brand.setLogo(cmd.logo());
             brand.setDescription(cmd.description());
             brand.setSort(cmd.sortOrDefault());
@@ -145,7 +176,7 @@ public class BrandServiceImpl implements BrandService {
             brandMapper.insert(brand);
         }
 
-        // 清理推荐品牌缓存
+        // 清理所有品牌相关缓存
         evictBrandCache();
     }
 
@@ -158,18 +189,18 @@ public class BrandServiceImpl implements BrandService {
         }
         brandMapper.deleteById(id);
 
-        // 清理推荐品牌缓存
+        // 清理所有品牌相关缓存
         evictBrandCache();
     }
 
     private void evictBrandCache() {
         try {
-            Set<String> keys = redisTemplate.keys(BRAND_FEATURED_CACHE_PREFIX + "*");
+            Set<String> keys = redisTemplate.keys("catalog:brand:*");
             if (keys != null && !keys.isEmpty()) {
                 redisTemplate.delete(keys);
             }
         } catch (Exception e) {
-            log.warn("主动清除推荐品牌缓存失败: {}", e.getMessage());
+            log.warn("主动清除品牌相关缓存失败: {}", e.getMessage());
         }
     }
 
@@ -177,6 +208,7 @@ public class BrandServiceImpl implements BrandService {
         return new BrandVO(
                 b.getId(),
                 b.getName(),
+                b.getOrigin(),
                 b.getLogo(),
                 b.getDescription(),
                 b.getSort(),

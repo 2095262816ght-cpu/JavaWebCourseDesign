@@ -60,6 +60,7 @@
             />
             <span class="brand-name">{{ product.brandName }}</span>
             <el-tag size="small" type="primary" round effect="light">品牌官方直营</el-tag>
+            <el-tag v-if="product.brandOrigin" size="small" type="info" round effect="light">产地: {{ product.brandOrigin }}</el-tag>
           </div>
 
           <h1 class="product-title">{{ product.name }}</h1>
@@ -104,6 +105,10 @@
             <div class="prop-item">
               <span class="prop-label">商品品类</span>
               <span class="prop-value">{{ product.categoryName }}</span>
+            </div>
+            <div class="prop-item" v-if="product.brandOrigin">
+              <span class="prop-label">品牌产地</span>
+              <span class="prop-value">{{ product.brandOrigin }}</span>
             </div>
             <div class="prop-item">
               <span class="prop-label">库存状态</span>

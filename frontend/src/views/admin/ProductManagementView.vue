@@ -628,7 +628,7 @@ async function handleUploadMainImage(options: UploadRequestOptions) {
   const form = new FormData()
   form.append('file', options.file)
   try {
-    const res = await request.post<any, any>('/common/upload', form, {
+    const res = await request.post<any, any>('/api/common/upload', form, {
       headers: { 'Content-Type': 'multipart/form-data' }
     })
     const url = typeof res === 'string' ? res : (res?.url || res?.data)
@@ -645,7 +645,7 @@ async function handleUploadSubImage(options: UploadRequestOptions) {
   const form = new FormData()
   form.append('file', options.file)
   try {
-    const res = await request.post<any, any>('/common/upload', form, {
+    const res = await request.post<any, any>('/api/common/upload', form, {
       headers: { 'Content-Type': 'multipart/form-data' }
     })
     const url = typeof res === 'string' ? res : (res?.url || res?.data)

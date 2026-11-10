@@ -7,6 +7,7 @@ import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 
 import java.io.Serializable;
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 @TableName("shop_cart_item")
@@ -17,7 +18,8 @@ public class ShopCartItem implements Serializable {
     @TableId(type = IdType.AUTO)
     private Long id;
 
-    private Long userId;
+    @TableField("user_id")
+    private Long customerId;
 
     private Long productId;
 
@@ -34,12 +36,22 @@ public class ShopCartItem implements Serializable {
     public ShopCartItem() {
     }
 
-    public ShopCartItem(Long id, Long userId, Long productId, Integer quantity, Integer checked) {
+    public ShopCartItem(Long id, Long customerId, Long productId, Integer quantity, Integer checked) {
         this.id = id;
-        this.userId = userId;
+        this.customerId = customerId;
         this.productId = productId;
         this.quantity = quantity;
         this.checked = checked;
+    }
+
+    /**
+     * 计算该购物车行项在指定单价下的小计金额 (消除 Feature Envy)
+     */
+    public BigDecimal calculateSubtotal(BigDecimal unitPrice) {
+        if (unitPrice == null || this.quantity == null) {
+            return BigDecimal.ZERO;
+        }
+        return unitPrice.multiply(BigDecimal.valueOf(this.quantity));
     }
 
     public Long getId() {
@@ -50,12 +62,20 @@ public class ShopCartItem implements Serializable {
         this.id = id;
     }
 
+    public Long getCustomerId() {
+        return customerId;
+    }
+
+    public void setCustomerId(Long customerId) {
+        this.customerId = customerId;
+    }
+
     public Long getUserId() {
-        return userId;
+        return customerId;
     }
 
     public void setUserId(Long userId) {
-        this.userId = userId;
+        this.customerId = userId;
     }
 
     public Long getProductId() {

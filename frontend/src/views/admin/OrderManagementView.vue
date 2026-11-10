@@ -71,7 +71,7 @@
           </template>
         </el-table-column>
 
-        <el-table-column prop="userId" label="顾客ID" width="85" align="center" />
+        <el-table-column prop="customerId" label="顾客ID" width="85" align="center" />
 
         <el-table-column prop="totalAmount" label="订单金额" width="120" align="right">
           <template #default="{ row }">
@@ -154,12 +154,12 @@
               {{ getStatusText(selectedOrder.status) }}
             </el-tag>
           </el-descriptions-item>
-          <el-descriptions-item label="下单用户ID">{{ selectedOrder.userId }}</el-descriptions-item>
+          <el-descriptions-item label="顾客ID">{{ selectedOrder.customerId || selectedOrder.userId }}</el-descriptions-item>
           <el-descriptions-item label="创建时间">{{ selectedOrder.createdAt }}</el-descriptions-item>
           <el-descriptions-item label="支付时间">{{ selectedOrder.paymentTime || '未支付' }}</el-descriptions-item>
-          <el-descriptions-item label="收件人姓名">{{ selectedOrder.receiverName }}</el-descriptions-item>
-          <el-descriptions-item label="收件人电话">{{ selectedOrder.receiverPhone }}</el-descriptions-item>
-          <el-descriptions-item label="收货详细地址">{{ selectedOrder.receiverAddress }}</el-descriptions-item>
+          <el-descriptions-item label="收件人姓名">{{ selectedOrder.deliveryAddress?.receiverName || selectedOrder.receiverName }}</el-descriptions-item>
+          <el-descriptions-item label="收件人电话">{{ selectedOrder.deliveryAddress?.receiverPhone || selectedOrder.receiverPhone }}</el-descriptions-item>
+          <el-descriptions-item label="收货详细地址">{{ selectedOrder.deliveryAddress?.receiverAddress || selectedOrder.receiverAddress }}</el-descriptions-item>
         </el-descriptions>
 
         <h4 class="drawer-section-title">订单商品行项快照（{{ selectedOrder.items?.length || 0 }} 款）</h4>

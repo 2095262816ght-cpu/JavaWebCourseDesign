@@ -101,6 +101,7 @@ class ProductCatalogServiceTest {
         assertThat(detail.id()).isEqualTo(1L);
         assertThat(detail.name()).contains("iPhone");
         assertThat(detail.brandName()).isEqualTo("Apple");
+        assertThat(detail.brandOrigin()).isEqualTo("美国加利福尼亚");
         assertThat(detail.categoryName()).isEqualTo("智能手机");
         assertThat(detail.subImages()).isNotEmpty();
 

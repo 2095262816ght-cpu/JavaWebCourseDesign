@@ -71,6 +71,46 @@ $$\text{Signature} = \text{HMACSHA256}(\text{base64UrlEncode}(\text{Header}) + "
 > [!IMPORTANT]
 > **防伪核心原理**：客户端若试图篡改 Payload 中的 `loginId` 或 `role`（如将 `ROLE_CUSTOMER` 篡改为 `ROLE_ADMIN`），由于黑客无法获知服务端的 `SecretKey`，篡改后的内容必定无法计算出相吻合的 `Signature`。服务端验签时会立即捕获异常并拦截请求。
 
+### 2.2 本项目 Sa-Token JWT Simple 模式落地实践
+
+在本项目中，我们通过引入 `sa-token-jwt` 依赖，并配置 `StpLogicJwtForSimple` 实现了现代化无状态 JWT 认证体系：
+
+#### 1. 为什么选用 `StpLogicJwtForSimple`（Simple 模式）而非 `StpLogicJwtForStateless`？
+- **Stateless（纯无状态模式）的弊端**：彻底禁用了服务端的 Session 存储机制，导致 Sa-Token 内部的动态权限缓存、封禁即刻下线（Force Logout）和会话临时数据无法使用，调用 `StpUtil.getSession()` 时会直接抛出 `ApiDisabledException`。
+- **Simple（简单 JWT 模式）的压倒性优势**：
+  1. **标准 JWT 传输**：颁发的 Token 为标准的由服务端密钥签名的三段式 JWT 字符串，客户端通过 HTTP Request Header 携带；
+  2. **兼备服务端会话管理能力**：服务端依然可以在 Redis 中维护极轻量的 Session 状态，支持管理员“一键下线违规用户”、“封禁账号即刻失效”等高阶风控能力，完美兼顾了 JWT 的无状态便携性与服务端的高效风控权。
+
+#### 2. 后端配置代码：[`SaTokenConfig.java`](file:///D:/JavaWeb/backend/src/main/java/com/shop/config/SaTokenConfig.java)
+```java
+@Configuration
+public class SaTokenConfig {
+
+    /**
+     * 注册 Sa-Token JWT Simple 扩展
+     * 生成标准可验签的 JWT 令牌，并支持 Redis 会话联动
+     */
+    @Bean
+    public StpLogic getStpLogicJwt() {
+        return new StpLogicJwtForSimple();
+    }
+}
+```
+
+#### 3. 配置文件声明：`application.yml`
+```yaml
+sa-token:
+  token-name: satoken                     # 请求头名称
+  timeout: 2592000                        # Token 有效期：30 天（秒）
+  active-timeout: -1                      # 最低活跃频率：-1 代表不限制
+  is-concurrent: true                     # 允许多端并发登录
+  is-share: true                          # 同一账号共享同一 Token
+  token-style: jwt                        # 指定 Token 风格为标准 JWT
+  jwt-secret-key: shop-platform-jwt-secret-key-32chars-min-abcdef123456  # HMAC-SHA256 签名绝密私钥
+  is-read-header: true                    # 允许从 Header 读取
+  is-read-cookie: false                   # 禁用 Cookie 传输，彻底杜绝 CSRF
+```
+
 ---
 
 ## 3. Sa-Token 框架底层设计与拦截链路
@@ -201,3 +241,25 @@ public class StpInterfaceImpl implements StpInterface {
 1. **自带动态随机盐（Random Salt）**：每次调用 `BCrypt.hashpw(password, BCrypt.gensalt())`，算法都会在内部生成一个全新的 128 位随机 Salt，并将其与计算后的 Hash 值合并打包存储在一串以 `$2a$10$...` 开头的 60 字符字符串中。
 2. **相同明文产生不同密文**：即使用户设置完全相同的密码（如 `123456`），由于每次生成的 Salt 随机，数据库持久化的密文完全不同，彻底粉碎了彩虹表攻击。
 3. **工作因子（Work Factor / Cost）自适应耗时**：BCrypt 支持调整计算复杂度（默认迭代 $2^{10}=1024$ 轮）。算法故意设计为 CPU 与内存密集型（约耗时 50-100ms），极大增加了黑客暴力枚举的攻击成本，同时保证了正常的业务登录响应体验。
+
+---
+
+## 6. 全链路认证与鉴权自动化测试验证
+
+为了确保 Token 注入、路由鉴权与越权拦截万无一失，本项目在前后端均编写了端到端的自动化测试：
+
+### 6.1 前端路由与网络拦截测试（Vitest 自动化套件）
+- **路由守卫拦截测试**（`frontend/test/router.spec.ts`）：
+  - 断言未登录访客访问受保护的 `/admin` 或 `/orders` 路径时，路由守卫自动截断并重定向至 `/login?redirect=...`；
+  - 断言持有普通顾客角色（`ROLE_CUSTOMER`）的用户试图直接输入 URL 访问 `/admin` 时，守卫立即判定权限不足并跳转至商城首页或提示 403；
+  - 断言系统管理员角色（`ROLE_ADMIN`）能够顺畅放行进入后台控制台。
+- **Axios 请求与响应拦截测试**（`frontend/test/request.spec.ts`）：
+  - 断言发起 API 调用时，请求拦截器（`request.ts`）直接通过 `localStorage.getItem('token')` 读取由 `useUserStore` 登录维护的活跃 JWT，并挂载到 Request Header `satoken: <token>` 中；
+  - 断言当后端返回 `401 Unauthorized` 或 Token 过期时，响应拦截器能自动清理本地持久化 Token（`localStorage.removeItem('token')` 与 `localStorage.removeItem('user')`）并阻止脏状态蔓延。
+
+### 6.2 后端认证服务集成测试（Spring Boot Test）
+- **认证服务全覆盖测试**（`backend/src/test/java/com/shop/modules/auth/AuthServiceTest.java`）：
+  - 测试正常注册、重复用户名冲突拦截；
+  - 测试正确密码登录并断言返回合法 JWT Token 与用户信息；
+  - 测试错误密码登录触发业务异常（返回 401 友好提示）；
+  - 测试注销登录与当前登录人资料查询（`getProfile`）。

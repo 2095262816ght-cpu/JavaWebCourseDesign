@@ -1,6 +1,6 @@
-# 07 - 课程答辩高频核心考问与满分应答秘籍（Top 10 Q&A Cheat Sheet）
+# 07 - 课程答辩高频核心考问与满分应答秘籍（Top 12 Q&A Cheat Sheet）
 
-> 本文是电商平台课程作业答辩决胜指南。汇集了高校课程答辩与技术面试中**最常被老师/考官提问的 10 大核心技术考点**。每个问题均提供：**考官提问意图解密**、**标准满分回答话术**、**本项目对应源码精确路径与代码引用**、以及**原理深挖反击点**。
+> 本文是电商平台课程作业答辩决胜指南。汇集了高校课程答辩与技术面试中**最常被老师/考官提问的 12 大核心技术考点**。每个问题均提供：**考官提问意图解密**、**标准满分回答话术**、**本项目对应源码精确路径与代码引用**、以及**原理深挖反击点**。
 
 ---
 
@@ -16,6 +16,8 @@
 - [Q8: Vue 3 相比 Vue 2 底层响应式原理发生了什么重大变革？Proxy 为什么优于 Object.defineProperty？](#q8-vue-3-相比-vue-2-底层响应式原理发生了什么重大变革proxy-为什么优于-objectdefineproperty)
 - [Q9: 前端项目为什么选用 Vite 而不是传统的 Webpack？启动和热更新机制有何不同？](#q9-前端项目为什么选用-vite-而不是传统的-webpack启动和热更新机制有何不同)
 - [Q10: 订单生成后如果商家后续修改了商品标题或价格，历史订单会不会被篡改？你是如何设计的？](#q10-订单生成后如果商家后续修改了商品标题或价格历史订单会不会被篡改你是如何设计的)
+- [Q11: 数据库表列名是 user_id，为什么 Java 实体和 Service 统一使用 customerId？](#q11-数据库表列名是-user_id为什么-java-实体和-service-统一使用-customerid)
+- [Q12: 前端如何防止普通顾客越权访问后台管理控制台？如何通过自动化测试证明安全性？](#q12-前端如何防止普通顾客越权访问后台管理控制台如何通过自动化测试证明安全性)
 
 ---
 
@@ -29,10 +31,12 @@
 1. **Spring Security 的痛点**：Spring Security 6 强制采用极其繁琐的 `SecurityFilterChain` 过滤器链配置，概念极其重且黑盒多（如 `AuthenticationManager`、`Provider`、`SecurityContextPersistenceFilter`），排查鉴权 Bug 成本高；同时默认基于 Session，在前后端分离无状态 Token 架构下需要手写大量的过滤器适配。
 2. **Sa-Token 的核心优势**：
    - **轻量且低侵入**：底层基于标准 Spring MVC `HandlerInterceptor` 拦截器，代码完全可控；
+   - **Simple JWT 模式（`StpLogicJwtForSimple`）**：引入 `sa-token-jwt` 生成标准 HMAC-SHA256 签名的 JWT 令牌，在客户端与 Request Header 中无状态安全流转，同时在服务端保留 Redis Session 支持，兼顾了 JWT 的无状态便携性与管理员即时封禁下线（Force Logout）的风控能力；
    - **声明式路由保护**：直接通过 `SaRouter.match("/api/admin/**", r -> StpUtil.checkRole("ROLE_ADMIN"))` 清晰直观地保护后台，一目了然；
    - **与现代 Spring Boot 3 天然兼容**：原生支持 Jakarta 命名空间、无状态 Token 生成、以及分布式 Redis 扩展。”
 
 #### 📂 本项目源码佐证
+- Sa-Token JWT 配置：[`com.shop.config.SaTokenConfig`](file:///D:/JavaWeb/backend/src/main/java/com/shop/config/SaTokenConfig.java)
 - 路由防护拦截配置：`com.shop.config.WebMvcConfig`（第 55-75 行）
 - 自定义角色动态加载：`com.shop.config.StpInterfaceImpl`（第 29-42 行）
 
@@ -44,7 +48,7 @@
 考察学生对并发竞态条件（Race Condition）、数据库锁机制及事务隔离性的掌握深度。
 
 #### 💡 满分回答话术
-“老师，我们在库存扣减上采用了**数据库单条 SQL 原子条件更新**方案，坚决摒弃了初学者常犯的‘先在 Java 查库存、再在内存判断、最后更新’的 Check-then-Act 错误模式。
+“老师，我们在库存扣减上采用了**数据库单条 SQL 原子条件更新 + 事务提交后双重缓存淘汰**方案，坚决摒弃了初学者常犯的‘先在 Java 查库存、再在内存判断、最后更新’的 Check-then-Act 错误模式。
 1. **核心 SQL 语句**：
    ```sql
    UPDATE shop_product 
@@ -54,12 +58,12 @@
      AND is_deleted = 0;
    ```
 2. **底层原理**：MySQL InnoDB 存储引擎在执行 UPDATE 时会自动为该行记录加排他行级锁（X 锁），让所有并发请求在内核层面排队。由于更新条件带有 `stock >= #{quantity}`，即使 100 个线程同时到达，当库存扣减至不足时，数据库直接返回受影响行数 `affectedRows = 0`。
-3. **事务熔断**：我们在 `OrderCheckoutServiceImpl` 中判断如果受影响行数为 0，立即抛出 `BusinessException`，触发 Spring `@Transactional` 事务无痕回滚，绝对杜绝超卖和负库存。
+3. **事务熔断与双重缓存淘汰**：我们在 `OrderCheckoutServiceImpl` 中判断如果受影响行数为 0，立即抛出 `BusinessException`，触发 Spring `@Transactional` 事务无痕回滚，绝对杜绝超卖和负库存。同时，扣减成功后即刻失效商品详情缓存，并注册 `TransactionSynchronization.afterCommit` 钩子在事务完全提交后二次淘汰，彻底杜绝并发脏缓存。
 4. **集成测试验证**：我们编写了 `OrderConcurrencyTest`，使用 `CountDownLatch` 门闩并发模拟 10 个线程抢购仅 1 件库存，测试结果严格断言为 1 笔成功、9 笔被拦截报错、最终库存精准归 0。”
 
 #### 📂 本项目源码佐证
 - 原子 SQL 声明：`com.shop.modules.catalog.mapper.ShopProductMapper`（第 17-18 行）
-- 业务扣减与回滚控制：`com.shop.modules.commerce.service.impl.OrderCheckoutServiceImpl`（第 94-98 行）
+- 业务扣减、回滚与事务同步缓存淘汰：`com.shop.modules.commerce.service.impl.OrderCheckoutServiceImpl`（`checkout` 方法与 `evictProductDetailCache`）
 - 多线程高并发测试用例：`backend/src/test/java/com/shop/modules/commerce/OrderConcurrencyTest.java`（第 78-162 行）
 
 ---
@@ -73,11 +77,16 @@
 “老师，传统学生作业中经常存在一种形式主义反模式：‘每个表都写一个只有透传一行的 Service，Controller 像写流水账一样去调用 5 个 Service’，这属于典型的**浅模块（Shallow Module）**。
 我们参考了斯坦福教授 John Ousterhout 的《软件设计哲学》：
 1. **深模块的本质**：**接口极简，实现极深**。对外暴露的调用表面积极小，但背后隐藏了大量复杂的状态流转与容灾控制。
-2. **以 `OrderCheckoutService.checkout()` 为例**：调用方 Controller 只需传 `userId` 和收货信息，单次调用就封装了：购物车勾选过滤、并发原子防超卖库存扣减、不可变商品快照生成、订单号生成、数据库事务一致性、购物车物理清理等 5 大复杂逻辑。
-3. **删除测试（Deletion Test）**：如果把这个深模块删掉，这 5 大核心逻辑就会散落在各个 Controller 里变得不可维护，证明该模块具有极高的抽象价值和重构防御力。”
+2. **以 `OrderCheckoutService.checkout()` 为例**：调用方 Controller 只需传 `customerId` 和收货信息命令对象，单次调用就封装了：
+   - 购物车勾选过滤与 `ProductBatchLookupHelper` 批处理防穿透检索；
+   - 委托充血实体 `ShopCartItem.calculateSubtotal()` 计算行小计（消除 Feature Envy）；
+   - 并发单 SQL 原子防超卖库存扣减与事务提交后缓存二次淘汰；
+   - 生成不可变商品快照并持久化 `DeliveryAddress` 值对象（消除数据泥团）；
+   - 数据库事务一致性保障与购物车已购条目物理清理。
+3. **删除测试（Deletion Test）**：如果把这个深模块删掉，这 6 大核心逻辑就会散落在各个 Controller 里变得不可维护，证明该模块具有极高的抽象价值和重构防御力。”
 
 #### 📂 本项目源码佐证
-- 详见技术讲义：[01-springboot3-internals-and-architecture.md](file:///D:/JavaWeb/docs/principles/01-springboot3-internals-and-architecture.md) 第 3 节。
+- 详见技术讲义：[01-springboot3-internals-and-architecture.md](file:///D:/JavaWeb/docs/principles/01-springboot3-internals-and-architecture.md) 第 3 节与第 4 节。
 
 ---
 
@@ -124,16 +133,20 @@
 考察分布式缓存的使用场景、Cache-Aside 经典模式以及双写一致性保障。
 
 #### 💡 满分回答话术
-“老师，我们在商品陈列的高频读场景中（如首页推荐品牌 `getFeaturedBrands` 和全部分类树 `getCategoryTree`）引入了 Redis 缓存。
-1. **Cache-Aside 模式**：
+“老师，我们在商品陈列的高频读场景中（如首页推荐品牌、全部分类树以及品牌分页检索）深度实践了 **Cache-Aside 旁路缓存模式**：
+1. **Cache-Aside 模式与分区键策略**：
    - **读操作**：先查 Redis，命中直接返回；未命中则查 MySQL，并写入 Redis 赋予 6 小时过期时间（TTL）；
-   - **写操作**：后台修改或删除品牌/分类时，先更新 MySQL 数据库，随后**主动淘汰（DEL）**对应的 Redis 缓存 Key。
+   - **防分页冲突的分区 Key 设计**：品牌默认首屏查询存入 `catalog:brand:all`，带特定分页或搜索条件的查询动态路由至 `catalog:brand:list:{page}:{size}:{kw}:{status}`，避免不同客户端的分页大小覆盖；
+   - **写操作主动淘汰**：后台修改或删除品牌/分类时，先更新 MySQL 数据库，随后**批量主动淘汰（DEL）**对应的缓存 Key。
 2. **为什么‘淘汰缓存’优于‘更新缓存’？**：
    - 如果两个线程并发写，更新缓存可能会因线程调度乱序导致旧值覆盖新值产生永久脏数据；而直接淘汰缓存消除了并发覆盖风险，同时避免了无读请求时频繁更新缓存造成的计算资源浪费。
-3. **容灾降级**：如果 Redis 服务暂时宕机，我们在 Service 内部捕获异常并降级直查 MySQL，绝不让缓存异常拖垮整个业务。”
+3. **事务同步双重淘汰（TransactionSynchronization.afterCommit）**：
+   - 在下单扣减库存等写事务中，单纯在事务体内部淘汰缓存容易因并发读线程在事务提交前读到旧快照而将脏数据重新回写进 Redis。我们通过注册 Spring 的 `afterCommit` 事务同步钩子，确保在数据库事务真正 commit 后二次发起淘汰，彻底杜绝脏缓存回写。
+4. **容灾降级**：如果 Redis 服务暂时宕机，我们在 Service 内部捕获异常并降级直查 MySQL，绝不让缓存异常拖垮整个业务。”
 
 #### 📂 本项目源码佐证
-- 读写生命周期与主动淘汰：`com.shop.modules.catalog.service.impl.BrandServiceImpl`（第 51-82 行、第 148-174 行）
+- 读写生命周期、分区 Key 与主动淘汰：`com.shop.modules.catalog.service.impl.BrandServiceImpl`（`getFeaturedBrands`、`listBrands`、`evictBrandCaches`）
+- 事务提交后双重淘汰实现：`com.shop.modules.commerce.service.impl.OrderCheckoutServiceImpl`（`evictProductDetailCache`）
 
 ---
 
@@ -210,3 +223,47 @@
 #### 📂 本项目源码佐证
 - 数据库表结构快照字段：`docs/sql/schema.sql`（`shop_order_item` 表，第 135-148 行）
 - 结算时写入不可变快照：`com.shop.modules.commerce.service.impl.OrderCheckoutServiceImpl`（第 117-129 行）
+
+---
+
+### Q11: 数据库表列名是 user_id，为什么 Java 实体和 Service 统一使用 customerId？
+
+#### 🎯 考官意图
+考察学生对**领域驱动设计（DDD）通用语言（Ubiquitous Language）**、模块边界划分以及 ORM 防腐层（Anticorruption Layer）的理解。
+
+#### 💡 满分回答话术
+“老师，这是一个体现代码工程素养和领域建模严谨性的重要设计细节：
+1. **消除泛化词汇的二义性**：在电商交易闭环中，浏览商品、加入购物车、下单结算的操作主体在业务概念上是明确的**顾客（Customer）**；而维护商品、审核订单的主体是**系统管理员（Administrator）**。如果业务代码和接口形参中通篇充斥着泛化的 `userId`，当读到 `order.getUserId()` 时很难第一时间确认这究竟是顾客 ID 还是操作员工号，极易引发业务混淆；
+2. **构建 ORM 防腐映射层**：数据库历史表设计中由于惯性往往将外键定义为 `user_id`。如果强行修改数据库物理列名，可能波及历史数据备份或外部脚本。我们通过 MyBatis-Plus 的注解：
+   ```java
+   @TableField("user_id")
+   private Long customerId;
+   ```
+   在持久化层与领域模型之间建立了优雅的防腐转换，既保留了数据库列名的向后兼容性，又在上层 Java 领域模型、DTO 与 Service 方法中实现了 100% 清晰严谨的领域通用语言。”
+
+#### 📂 本项目源码佐证
+- 实体属性解耦映射：[`ShopCartItem.java`](file:///D:/JavaWeb/backend/src/main/java/com/shop/modules/commerce/entity/ShopCartItem.java)、[`ShopOrder.java`](file:///D:/JavaWeb/backend/src/main/java/com/shop/modules/commerce/entity/ShopOrder.java)
+- 领域服务契约定义：[`OrderCheckoutService.java`](file:///D:/JavaWeb/backend/src/main/java/com/shop/modules/commerce/service/OrderCheckoutService.java)
+
+---
+
+### Q12: 前端如何防止普通顾客越权访问后台管理控制台？如何通过自动化测试证明安全性？
+
+#### 🎯 考官意图
+考察学生对全栈纵深防御体系、前端单页面应用（SPA）动态路由拦截、以及前端工程化自动化测试（Automated Testing）的掌握程度。
+
+#### 💡 满分回答话术
+“老师，我们构建了**前端体验阻断 + 后端物理熔断 + 自动化测试断言**的三重立体防护：
+1. **前端路由守卫拦截（Router Guard）**：
+   - 在 `frontend/src/router/index.ts` 中配置了全局前置守卫 `router.beforeEach`。所有 `/admin` 路由元信息均声明了 `meta: { requiresAdmin: true }`；
+   - 当普通顾客登录后试图在浏览器地址栏手动输入 `http://localhost:5173/admin` 试图越权时，守卫判定 `userStore.isAdmin` 为 false，在客户端即刻拦截，阻止后台管理组件渲染并弹窗提示无权访问；
+2. **后端 Sa-Token 强校验绝对兜底**：
+   - 前端拦截主要为了提升用户交互体验，不能作为绝对安全屏障。后端在 `WebMvcConfig` 中配置了 `SaRouter.match("/api/admin/**", r -> StpUtil.checkRole("ROLE_ADMIN"))`，黑客即便绕过前端直接用 Postman 调用管理 API，依然会被 Sa-Token 判定 403 物理拦截；
+3. **前端自动化测试套件（Vitest + happy-dom）硬核证明**：
+   - 我们编写了自动化测试套件 `frontend/test/router.spec.ts`，在轻量 DOM 仿真环境下真实模拟未登录访客、普通顾客、管理员三种身份分别跳转 `/admin` 路径，严格断言未登录重定向至 `/login`、顾客拦截跳转、管理员合法放行；
+   - 执行 `npm test` 即可在毫秒级内跑完全套 15 个测试断言，用绿色自动化测试用例向答辩老师硬核证明鉴权逻辑的安全与完备。”
+
+#### 📂 本项目源码佐证
+- 前端路由守卫：`frontend/src/router/index.ts`（第 103-136 行）
+- 前端自动化测试用例：[`frontend/test/router.spec.ts`](file:///D:/JavaWeb/frontend/test/router.spec.ts)
+- 后端路由拦截：`com.shop.config.WebMvcConfig`（第 55-65 行）

@@ -60,11 +60,11 @@ class OrderConcurrencyTest {
         }
         for (Long uid : testUserIds) {
             LambdaQueryWrapper<ShopCartItem> cartWrapper = new LambdaQueryWrapper<>();
-            cartWrapper.eq(ShopCartItem::getUserId, uid);
+            cartWrapper.eq(ShopCartItem::getCustomerId, uid);
             cartItemMapper.delete(cartWrapper);
 
             LambdaQueryWrapper<ShopOrder> orderWrapper = new LambdaQueryWrapper<>();
-            orderWrapper.eq(ShopOrder::getUserId, uid);
+            orderWrapper.eq(ShopOrder::getCustomerId, uid);
             List<ShopOrder> orders = orderMapper.selectList(orderWrapper);
             for (ShopOrder order : orders) {
                 LambdaQueryWrapper<ShopOrderItem> itemWrapper = new LambdaQueryWrapper<>();
@@ -100,7 +100,7 @@ class OrderConcurrencyTest {
             testUserIds.add(userId);
 
             ShopCartItem cartItem = new ShopCartItem();
-            cartItem.setUserId(userId);
+            cartItem.setCustomerId(userId);
             cartItem.setProductId(testProductId);
             cartItem.setQuantity(1);
             cartItem.setChecked(1);

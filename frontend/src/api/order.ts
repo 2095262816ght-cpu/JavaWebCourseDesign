@@ -12,15 +12,23 @@ export interface OrderItem {
   totalPrice: number
 }
 
+export interface DeliveryAddress {
+  receiverName: string
+  receiverPhone: string
+  receiverAddress: string
+}
+
 export interface OrderSummary {
   id: number
   orderNo: string
-  userId: number
+  customerId: number
+  userId?: number
   totalAmount: number
   status: 'UNPAID' | 'PAID' | 'SHIPPED' | 'COMPLETED' | 'CANCELLED'
   receiverName: string
   receiverPhone: string
   receiverAddress: string
+  deliveryAddress?: DeliveryAddress
   paymentTime: string | null
   createdAt: string
   itemCount: number
@@ -35,6 +43,7 @@ export interface CheckoutCommand {
   receiverName: string
   receiverPhone: string
   receiverAddress: string
+  deliveryAddress?: DeliveryAddress
 }
 
 export interface OrderCheckoutResult {

@@ -11,41 +11,41 @@ public interface CartService {
     /**
      * 获取顾客购物车全部明细、勾选统计及实时小计金额
      *
-     * @param userId 顾客用户ID
+     * @param customerId 顾客ID
      * @return 购物车聚合视图
      */
-    CartSummaryVO getCart(Long userId);
+    CartSummaryVO getCart(Long customerId);
 
     /**
      * 添加商品到购物车（若已存在该商品行项，则原子累加数量并校验库存）
      *
-     * @param userId 顾客用户ID
-     * @param cmd    加购命令
+     * @param customerId 顾客ID
+     * @param cmd        加购命令
      */
-    void addItem(Long userId, AddCartCommand cmd);
+    void addItem(Long customerId, AddCartCommand cmd);
 
     /**
      * 更新购物车行项数量或勾选状态
      *
-     * @param userId     顾客用户ID
+     * @param customerId 顾客ID
      * @param cartItemId 购物车记录ID
      * @param quantity   新数量（可为 null）
      * @param checked    新勾选状态（可为 null）
      */
-    void updateItem(Long userId, Long cartItemId, Integer quantity, Boolean checked);
+    void updateItem(Long customerId, Long cartItemId, Integer quantity, Boolean checked);
 
     /**
      * 移除购物车单项
      *
-     * @param userId     顾客用户ID
+     * @param customerId 顾客ID
      * @param cartItemId 购物车记录ID
      */
-    void removeItem(Long userId, Long cartItemId);
+    void removeItem(Long customerId, Long cartItemId);
 
     /**
      * 清空顾客购物车
      *
-     * @param userId 顾客用户ID
+     * @param customerId 顾客ID
      */
-    void clearCart(Long userId);
+    void clearCart(Long customerId);
 }

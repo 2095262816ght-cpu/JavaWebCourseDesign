@@ -70,9 +70,9 @@ flowchart TD
 
 ## 2. 身份认证与权限控制（Sa-Token + 动态 RBAC）
 
-### 2.1 无状态 Token 架构与天然免疫 CSRF
+### 2.1 无状态 JWT 架构与天然免疫 CSRF
 - **传统 Cookie/Session 的弊端**：浏览器发出的请求会自动携带 Cookie，恶意第三方网站诱导用户点击链接即可发起跨站伪造请求（CSRF），后端必须引入繁重的 CSRF Token 校验。
-- **本项目方案**：采用 **Sa-Token** 无状态架构，前端在 Axios 拦截器中提取 `localStorage` 中的 Token，显式挂载到 HTTP Request Header `satoken: <token>` 中传输。浏览器跨站请求绝不会自动携带自定义 Header，**天然免疫 CSRF 攻击**。
+- **本项目方案**：采用 **Sa-Token JWT Simple 模式**（[`SaTokenConfig.java`](file:///D:/JavaWeb/backend/src/main/java/com/shop/config/SaTokenConfig.java)），服务端基于 HMAC-SHA256 私钥颁发标准 JWT 令牌，前端在 Axios 拦截器中提取 `localStorage` 中的 Token，显式挂载到 HTTP Request Header `satoken: <token>` 中传输。浏览器跨站请求绝不会自动携带自定义 Header，**天然免疫 CSRF 攻击**。同时服务端保留 Redis 极轻量 Session，兼具无状态传输与即时封禁下线能力。
 
 ### 2.2 路由级声明式拦截
 在 `com.shop.config.WebMvcConfig` 中：
@@ -123,18 +123,18 @@ flowchart TD
 初学者最易犯的安全漏洞：在获取购物车或订单时，依赖前端传入 `userId`（如 `/api/orders?userId=2`），黑客只需篡改 URL 中的数字即可窥探他人隐私。
 
 **本项目的防御方案**：
-1. **服务端绑定登录凭证**：所有顾客端 Controller（`OrderController`、`CartController`）的接口形参中**绝对不接收客户端传入的 `userId`**，统一通过 `StpUtil.getLoginIdAsLong()` 从服务端加密线程上下文中提取；
-2. **深度比对资源归属**：
+1. **服务端绑定登录凭证**：所有顾客端 Controller（`OrderController`、`CartController`）的接口形参中**绝对不接收客户端传入的 `userId` 或 `customerId`**，统一通过 `StpUtil.getLoginIdAsLong()` 从服务端加密线程上下文中提取；
+2. **深度比对资源归属（基于严谨统一的 `customerId`）**：
    - 订单详情查看：
      ```java
-     if (userId != null && !userId.equals(order.getUserId())) {
-         throw new BusinessException(ResultCode.FORBIDDEN.getCode(), "无权查看他人订单");
+     if (customerId != null && !customerId.equals(order.getCustomerId())) {
+         throw new BusinessException(ResultCode.FORBIDDEN.getCode(), "无权查看或操作该订单");
      }
      ```
    - 购物车条目修改/删除：
      ```java
      ShopCartItem item = cartItemMapper.selectById(cartItemId);
-     if (item == null || !userId.equals(item.getUserId())) {
+     if (item == null || !customerId.equals(item.getCustomerId())) {
          throw new BusinessException(ResultCode.NOT_FOUND.getCode(), "未找到该购物车记录");
      }
      ```
@@ -154,10 +154,12 @@ flowchart TD
   ```
 - **工作机制**：MySQL InnoDB 存储引擎在执行 `UPDATE` 时自动加行级排他锁（X 锁），所有并发请求在数据库内核层面排队。当库存不足时，更新返回 `affectedRows = 0`。
 - **业务熔断**：`OrderCheckoutServiceImpl` 判断如果受影响行数为 0，立即抛出 `BusinessException` 触发 Spring `@Transactional` 事务无痕回滚，杜绝超卖。
+- **事务提交后双重缓存淘汰（afterCommit）**：库存扣减成功后即刻失效商品详情缓存，并注册 `TransactionSynchronization.afterCommit` 钩子，确保在 MySQL 事务完全 commit 后二次淘汰，避免并发读线程在事务提交前将旧快照数据回写污染 Redis。
 - **压测断言**：经 `OrderConcurrencyTest`（10 线程并发争抢 1 件库存）严格验证：1 笔成功、9 笔被原子拦截，库存精确归 0。
 
-### 5.2 金额防篡改与不可变快照（Snapshot Pattern）
-- **金额不可信**：订单总结算金额完全由后端基于数据库中商品的真实单价和购买数量重算，客户端传来的任何价格均直接忽略；
+### 5.2 金额防篡改、不可变快照与收货地址值对象（DeliveryAddress）
+- **金额不可信**：订单总结算金额完全由后端基于数据库中商品的真实单价和购买数量重算（委托 `ShopCartItem.calculateSubtotal()` 充血实体计算），客户端传来的任何价格均直接忽略；
+- **收货地址值对象模式（`DeliveryAddress`）**：将收件人姓名、电话和地址封装为不可变的值对象，杜绝多字段数据泥团并提供防穿透校验；
 - **不可变商品快照**：下单时将商品当时的名称、单价、主图深拷贝持久化至 `shop_order_item`。商家后续修改标题、降价或删除商品，历史订单数据均不会被篡改，保证法律效力与审计严肃性。
 
 ---
@@ -326,8 +328,8 @@ server {
 ### 考问 3：什么是水平越权（IDOR）？你在项目中是如何防御的？
 > **满分回答话术**：  
 > “水平越权是指同级别权限的用户通过篡改资源 ID 访问或修改他人数据。本项目的防御体现在两个层面：  
-> 1. **入口凭据信任度**：在所有涉及个人私有数据的 Controller 中，形参绝对不接收前端传入的 `userId`，而是直接通过 `StpUtil.getLoginIdAsLong()` 从服务端加密 Token 上下文提取；  
-> 2. **数据访问所有权严格校验**：在订单查询、支付和购物车修改等 Service 中，取出数据后第一件事就是校验 `if (!userId.equals(resource.getUserId())) throw ForbiddenException;`，彻底从业务逻辑层封死水平越权漏洞。”
+> 1. **入口凭据信任度**：在所有涉及个人私有数据的 Controller 中，形参绝对不接收前端传入的 `customerId`，而是直接通过 `StpUtil.getLoginIdAsLong()` 从服务端加密 Token 上下文提取；  
+> 2. **数据访问所有权严格校验**：在订单查询、支付和购物车修改等 Service 中，统一使用无二义性的 `customerId` 领域属性，取出数据后第一件事就是校验 `if (!customerId.equals(resource.getCustomerId())) throw ForbiddenException;`，彻底从业务逻辑层封死水平越权漏洞。”
 
 ---
 

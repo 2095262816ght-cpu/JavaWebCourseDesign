@@ -25,10 +25,35 @@ public class CheckoutCommand {
     public CheckoutCommand() {
     }
 
+    public CheckoutCommand(DeliveryAddress deliveryAddress) {
+        setDeliveryAddress(deliveryAddress);
+    }
+
     public CheckoutCommand(String receiverName, String receiverPhone, String receiverAddress) {
         this.receiverName = receiverName;
         this.receiverPhone = receiverPhone;
         this.receiverAddress = receiverAddress;
+    }
+
+    /**
+     * 获取封装的配送收件地址值对象 (消除 Data Clump & Primitive Obsession)
+     */
+    public DeliveryAddress getDeliveryAddress() {
+        if (receiverName != null || receiverPhone != null || receiverAddress != null) {
+            return new DeliveryAddress(receiverName, receiverPhone, receiverAddress);
+        }
+        return null;
+    }
+
+    /**
+     * 设置配送收件地址值对象
+     */
+    public void setDeliveryAddress(DeliveryAddress deliveryAddress) {
+        if (deliveryAddress != null) {
+            this.receiverName = deliveryAddress.getReceiverName();
+            this.receiverPhone = deliveryAddress.getReceiverPhone();
+            this.receiverAddress = deliveryAddress.getReceiverAddress();
+        }
     }
 
     public String getReceiverName() {

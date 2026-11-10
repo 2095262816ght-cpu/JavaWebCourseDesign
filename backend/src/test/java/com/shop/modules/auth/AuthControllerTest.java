@@ -34,7 +34,7 @@ class AuthControllerTest {
     @DisplayName("测试公开注册与登录流程 (HTTP API)")
     void testRegisterAndLoginApi() throws Exception {
         String testUser = "api_" + UUID.randomUUID().toString().substring(0, 8);
-        RegisterCommand registerCmd = new RegisterCommand(testUser, "12345678", "API测试买家", null);
+        RegisterCommand registerCmd = new RegisterCommand(testUser, "12345678", "API测试顾客", null);
 
         // 1. 发起注册
         mockMvc.perform(post("/api/auth/register")
@@ -47,13 +47,18 @@ class AuthControllerTest {
 
         // 2. 发起登录
         LoginCommand loginCmd = new LoginCommand(testUser, "12345678");
-        mockMvc.perform(post("/api/auth/login")
+        String loginRes = mockMvc.perform(post("/api/auth/login")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(loginCmd)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code", is(200)))
                 .andExpect(jsonPath("$.data.tokenValue").isNotEmpty())
-                .andExpect(jsonPath("$.data.user.username", is(testUser)));
+                .andExpect(jsonPath("$.data.user.username", is(testUser)))
+                .andReturn().getResponse().getContentAsString();
+
+        // 3. 验证 Sa-Token 签发的是 Stateless JWT (包含 header.payload.signature 三段点号分割)
+        String token = objectMapper.readTree(loginRes).path("data").path("tokenValue").asText();
+        org.assertj.core.api.Assertions.assertThat(token.split("\\.")).hasSize(3);
     }
 
     @Test

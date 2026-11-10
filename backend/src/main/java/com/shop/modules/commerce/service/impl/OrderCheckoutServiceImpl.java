@@ -7,6 +7,7 @@ import com.shop.common.result.PageResult;
 import com.shop.common.result.ResultCode;
 import com.shop.modules.catalog.entity.ShopProduct;
 import com.shop.modules.catalog.mapper.ShopProductMapper;
+import com.shop.modules.catalog.service.impl.ProductCatalogServiceImpl;
 import com.shop.modules.commerce.dto.AdminOrderQuery;
 import com.shop.modules.commerce.dto.CheckoutCommand;
 import com.shop.modules.commerce.dto.OrderCheckoutResult;
@@ -20,8 +21,14 @@ import com.shop.modules.commerce.mapper.ShopCartItemMapper;
 import com.shop.modules.commerce.mapper.ShopOrderItemMapper;
 import com.shop.modules.commerce.mapper.ShopOrderMapper;
 import com.shop.modules.commerce.service.OrderCheckoutService;
+import com.shop.modules.commerce.service.ProductBatchLookupHelper;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.util.StringUtils;
 
 import java.math.BigDecimal;
@@ -37,33 +44,40 @@ import java.util.stream.Collectors;
 @Service
 public class OrderCheckoutServiceImpl implements OrderCheckoutService {
 
+    private static final Logger log = LoggerFactory.getLogger(OrderCheckoutServiceImpl.class);
     private static final DateTimeFormatter ORDER_NO_FORMATTER = DateTimeFormatter.ofPattern("yyyyMMddHHmmssSSS");
 
     private final ShopCartItemMapper cartItemMapper;
     private final ShopProductMapper productMapper;
     private final ShopOrderMapper orderMapper;
     private final ShopOrderItemMapper orderItemMapper;
+    private final ProductBatchLookupHelper productBatchLookupHelper;
+    private final StringRedisTemplate redisTemplate;
 
     public OrderCheckoutServiceImpl(ShopCartItemMapper cartItemMapper,
                                     ShopProductMapper productMapper,
                                     ShopOrderMapper orderMapper,
-                                    ShopOrderItemMapper orderItemMapper) {
+                                    ShopOrderItemMapper orderItemMapper,
+                                    ProductBatchLookupHelper productBatchLookupHelper,
+                                    StringRedisTemplate redisTemplate) {
         this.cartItemMapper = cartItemMapper;
         this.productMapper = productMapper;
         this.orderMapper = orderMapper;
         this.orderItemMapper = orderItemMapper;
+        this.productBatchLookupHelper = productBatchLookupHelper;
+        this.redisTemplate = redisTemplate;
     }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public OrderCheckoutResult checkout(Long userId, CheckoutCommand cmd) {
-        if (userId == null) {
+    public OrderCheckoutResult checkout(Long customerId, CheckoutCommand cmd) {
+        if (customerId == null) {
             throw new BusinessException(ResultCode.UNAUTHORIZED);
         }
 
         // 1. 读取顾客已勾选的购物车项
         LambdaQueryWrapper<ShopCartItem> cartQuery = new LambdaQueryWrapper<>();
-        cartQuery.eq(ShopCartItem::getUserId, userId)
+        cartQuery.eq(ShopCartItem::getCustomerId, customerId)
                 .eq(ShopCartItem::getChecked, 1);
         List<ShopCartItem> cartItems = cartItemMapper.selectList(cartQuery);
 
@@ -73,12 +87,9 @@ public class OrderCheckoutServiceImpl implements OrderCheckoutService {
 
         List<Long> productIds = cartItems.stream()
                 .map(ShopCartItem::getProductId)
-                .distinct()
                 .toList();
 
-        List<ShopProduct> products = productMapper.selectBatchIds(productIds);
-        Map<Long, ShopProduct> productMap = products.stream()
-                .collect(Collectors.toMap(ShopProduct::getId, p -> p, (k1, k2) -> k1));
+        Map<Long, ShopProduct> productMap = productBatchLookupHelper.getProductMapByIds(productIds);
 
         // 2. 校验商品有效性与单句行级锁原子扣减库存
         BigDecimal totalAmount = BigDecimal.ZERO;
@@ -99,23 +110,25 @@ public class OrderCheckoutServiceImpl implements OrderCheckoutService {
                 throw new BusinessException("商品 [" + product.getName() + "] 库存不足，扣减失败");
             }
 
-            BigDecimal lineSubtotal = product.getPrice().multiply(BigDecimal.valueOf(item.getQuantity()));
+            // 扣减成功后立即主动失效 Redis 商品详情与聚合橱窗缓存，确保前台查看实时库存 (Cache Invalidation)
+            evictProductDetailCache(product.getId());
+
+            // 消除 Feature Envy：委托 item 计算自身在指定单价下的小计金额
+            BigDecimal lineSubtotal = item.calculateSubtotal(product.getPrice());
             totalAmount = totalAmount.add(lineSubtotal);
         }
 
-        // 3. 生成唯一订单编号并持久化订单主表
+        // 3. 生成唯一订单编号并持久化订单主表（封装 DeliveryAddress 数据泥团）
         String orderNo = generateOrderNo();
         ShopOrder order = new ShopOrder();
         order.setOrderNo(orderNo);
-        order.setUserId(userId);
+        order.setCustomerId(customerId);
         order.setTotalAmount(totalAmount);
-        order.setReceiverName(cmd.getReceiverName().trim());
-        order.setReceiverPhone(cmd.getReceiverPhone().trim());
-        order.setReceiverAddress(cmd.getReceiverAddress().trim());
+        order.setDeliveryAddress(cmd.getDeliveryAddress());
         order.setStatus("UNPAID");
         orderMapper.insert(order);
 
-        // 4. 生成订单项不可变价格与图片快照并保存
+        // 4. 生成订单项不可变价格与图片快照并保存（消除 Feature Envy：委托 orderItem 计算小计）
         for (ShopCartItem item : cartItems) {
             ShopProduct product = productMap.get(item.getProductId());
             ShopOrderItem orderItem = new ShopOrderItem();
@@ -126,7 +139,7 @@ public class OrderCheckoutServiceImpl implements OrderCheckoutService {
             orderItem.setProductImage(product.getMainImage());
             orderItem.setUnitPrice(product.getPrice());
             orderItem.setQuantity(item.getQuantity());
-            orderItem.setTotalPrice(product.getPrice().multiply(BigDecimal.valueOf(item.getQuantity())));
+            orderItem.setTotalPrice(orderItem.calculateSubtotal());
             orderItemMapper.insert(orderItem);
         }
 
@@ -139,7 +152,7 @@ public class OrderCheckoutServiceImpl implements OrderCheckoutService {
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public void pay(Long userId, String orderNo) {
+    public void pay(Long customerId, String orderNo) {
         if (!StringUtils.hasText(orderNo)) {
             throw new BusinessException("订单编号不能为空");
         }
@@ -152,7 +165,7 @@ public class OrderCheckoutServiceImpl implements OrderCheckoutService {
             throw new BusinessException(ResultCode.NOT_FOUND.getCode(), "未找到该订单");
         }
 
-        if (userId != null && !userId.equals(order.getUserId())) {
+        if (customerId != null && !customerId.equals(order.getCustomerId())) {
             throw new BusinessException(ResultCode.FORBIDDEN.getCode(), "无权操作该订单");
         }
 
@@ -170,14 +183,14 @@ public class OrderCheckoutServiceImpl implements OrderCheckoutService {
     }
 
     @Override
-    public PageResult<OrderSummaryVO> listCustomerOrders(Long userId, int pageNum, int pageSize) {
-        if (userId == null) {
+    public PageResult<OrderSummaryVO> listCustomerOrders(Long customerId, int pageNum, int pageSize) {
+        if (customerId == null) {
             return PageResult.of(pageNum, pageSize, 0L, Collections.emptyList());
         }
 
         Page<ShopOrder> page = new Page<>(pageNum, pageSize);
         LambdaQueryWrapper<ShopOrder> queryWrapper = new LambdaQueryWrapper<>();
-        queryWrapper.eq(ShopOrder::getUserId, userId)
+        queryWrapper.eq(ShopOrder::getCustomerId, customerId)
                 .orderByDesc(ShopOrder::getCreatedAt);
 
         Page<ShopOrder> resultPage = orderMapper.selectPage(page, queryWrapper);
@@ -192,7 +205,7 @@ public class OrderCheckoutServiceImpl implements OrderCheckoutService {
     }
 
     @Override
-    public OrderDetailVO getOrderDetail(Long userId, Long orderId) {
+    public OrderDetailVO getOrderDetail(Long customerId, Long orderId) {
         if (orderId == null) {
             throw new BusinessException(ResultCode.BAD_REQUEST.getCode(), "订单ID不能为空");
         }
@@ -202,7 +215,7 @@ public class OrderCheckoutServiceImpl implements OrderCheckoutService {
             throw new BusinessException(ResultCode.NOT_FOUND.getCode(), "订单记录不存在");
         }
 
-        if (userId != null && !userId.equals(order.getUserId())) {
+        if (customerId != null && !customerId.equals(order.getCustomerId())) {
             throw new BusinessException(ResultCode.FORBIDDEN.getCode(), "无权查看他人订单");
         }
 
@@ -217,12 +230,10 @@ public class OrderCheckoutServiceImpl implements OrderCheckoutService {
         return new OrderDetailVO(
                 order.getId(),
                 order.getOrderNo(),
-                order.getUserId(),
+                order.getCustomerId(),
                 order.getTotalAmount(),
                 order.getStatus(),
-                order.getReceiverName(),
-                order.getReceiverPhone(),
-                order.getReceiverAddress(),
+                order.getDeliveryAddress(),
                 order.getPaymentTime(),
                 order.getCreatedAt(),
                 order.getUpdatedAt(),
@@ -282,6 +293,30 @@ public class OrderCheckoutServiceImpl implements OrderCheckoutService {
         return PageResult.of(resultPage.getCurrent(), resultPage.getSize(), resultPage.getTotal(), summaryVOList);
     }
 
+    private void evictProductDetailCache(Long productId) {
+        if (productId == null || redisTemplate == null) {
+            return;
+        }
+        doEvictProductDetailCache(productId);
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    doEvictProductDetailCache(productId);
+                }
+            });
+        }
+    }
+
+    private void doEvictProductDetailCache(Long productId) {
+        try {
+            redisTemplate.delete(ProductCatalogServiceImpl.PRODUCT_DETAIL_CACHE_PREFIX + productId);
+            redisTemplate.delete(ProductCatalogServiceImpl.HOME_SHOWCASE_CACHE_KEY);
+        } catch (Exception e) {
+            log.warn("扣减库存后清除商品详情缓存失败: productId={}, err={}", productId, e.getMessage());
+        }
+    }
+
     private List<OrderSummaryVO> enrichOrdersWithItems(List<ShopOrder> orders) {
         List<Long> orderIds = orders.stream().map(ShopOrder::getId).toList();
         LambdaQueryWrapper<ShopOrderItem> itemQuery = new LambdaQueryWrapper<>();
@@ -300,12 +335,10 @@ public class OrderCheckoutServiceImpl implements OrderCheckoutService {
             OrderSummaryVO summaryVO = new OrderSummaryVO(
                     order.getId(),
                     order.getOrderNo(),
-                    order.getUserId(),
+                    order.getCustomerId(),
                     order.getTotalAmount(),
                     order.getStatus(),
-                    order.getReceiverName(),
-                    order.getReceiverPhone(),
-                    order.getReceiverAddress(),
+                    order.getDeliveryAddress(),
                     order.getPaymentTime(),
                     order.getCreatedAt(),
                     itemCount,

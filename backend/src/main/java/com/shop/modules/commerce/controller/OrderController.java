@@ -34,16 +34,16 @@ public class OrderController {
     @Operation(summary = "提交购物车结算下单", description = "读取已勾选购物车条目，执行单SQL原子库存扣减，生成订单快照并清空购物车")
     @PostMapping("/checkout")
     public Result<OrderCheckoutResult> checkout(@Valid @RequestBody CheckoutCommand cmd) {
-        Long userId = StpUtil.getLoginIdAsLong();
-        OrderCheckoutResult result = orderCheckoutService.checkout(userId, cmd);
+        Long customerId = StpUtil.getLoginIdAsLong();
+        OrderCheckoutResult result = orderCheckoutService.checkout(customerId, cmd);
         return Result.success("下单成功", result);
     }
 
     @Operation(summary = "模拟订单支付", description = "将 UNPAID 状态订单流转为 PAID，并记录支付成功时间")
     @PostMapping("/{orderNo}/pay")
     public Result<Void> pay(@PathVariable String orderNo) {
-        Long userId = StpUtil.getLoginIdAsLong();
-        orderCheckoutService.pay(userId, orderNo);
+        Long customerId = StpUtil.getLoginIdAsLong();
+        orderCheckoutService.pay(customerId, orderNo);
         return Result.success("支付成功", null);
     }
 
@@ -53,16 +53,16 @@ public class OrderController {
             @RequestParam(defaultValue = "1") int pageNum,
             @RequestParam(defaultValue = "10") int pageSize
     ) {
-        Long userId = StpUtil.getLoginIdAsLong();
-        PageResult<OrderSummaryVO> pageResult = orderCheckoutService.listCustomerOrders(userId, pageNum, pageSize);
+        Long customerId = StpUtil.getLoginIdAsLong();
+        PageResult<OrderSummaryVO> pageResult = orderCheckoutService.listCustomerOrders(customerId, pageNum, pageSize);
         return Result.success(pageResult);
     }
 
     @Operation(summary = "获取指定订单详情", description = "查看订单详细收件信息、商品行项快照与金额详情")
     @GetMapping("/{id}")
     public Result<OrderDetailVO> getOrderDetail(@PathVariable Long id) {
-        Long userId = StpUtil.getLoginIdAsLong();
-        OrderDetailVO detail = orderCheckoutService.getOrderDetail(userId, id);
+        Long customerId = StpUtil.getLoginIdAsLong();
+        OrderDetailVO detail = orderCheckoutService.getOrderDetail(customerId, id);
         return Result.success(detail);
     }
 }

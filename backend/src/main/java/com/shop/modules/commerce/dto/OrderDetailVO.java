@@ -16,8 +16,8 @@ public class OrderDetailVO {
     @Schema(description = "唯一业务订单编号", example = "ORD202611042130008899")
     private String orderNo;
 
-    @Schema(description = "顾客用户ID", example = "2")
-    private Long userId;
+    @Schema(description = "顾客ID", example = "2")
+    private Long customerId;
 
     @Schema(description = "订单总金额", example = "19998.00")
     private BigDecimal totalAmount;
@@ -49,13 +49,28 @@ public class OrderDetailVO {
     public OrderDetailVO() {
     }
 
-    public OrderDetailVO(Long id, String orderNo, Long userId, BigDecimal totalAmount,
+    public OrderDetailVO(Long id, String orderNo, Long customerId, BigDecimal totalAmount,
+                         String status, DeliveryAddress deliveryAddress, LocalDateTime paymentTime,
+                         LocalDateTime createdAt, LocalDateTime updatedAt, List<OrderItemVO> items) {
+        this.id = id;
+        this.orderNo = orderNo;
+        this.customerId = customerId;
+        this.totalAmount = totalAmount;
+        this.status = status;
+        setDeliveryAddress(deliveryAddress);
+        this.paymentTime = paymentTime;
+        this.createdAt = createdAt;
+        this.updatedAt = updatedAt;
+        this.items = items != null ? items : new ArrayList<>();
+    }
+
+    public OrderDetailVO(Long id, String orderNo, Long customerId, BigDecimal totalAmount,
                          String status, String receiverName, String receiverPhone,
                          String receiverAddress, LocalDateTime paymentTime,
                          LocalDateTime createdAt, LocalDateTime updatedAt, List<OrderItemVO> items) {
         this.id = id;
         this.orderNo = orderNo;
-        this.userId = userId;
+        this.customerId = customerId;
         this.totalAmount = totalAmount;
         this.status = status;
         this.receiverName = receiverName;
@@ -83,12 +98,20 @@ public class OrderDetailVO {
         this.orderNo = orderNo;
     }
 
+    public Long getCustomerId() {
+        return customerId;
+    }
+
+    public void setCustomerId(Long customerId) {
+        this.customerId = customerId;
+    }
+
     public Long getUserId() {
-        return userId;
+        return customerId;
     }
 
     public void setUserId(Long userId) {
-        this.userId = userId;
+        this.customerId = userId;
     }
 
     public BigDecimal getTotalAmount() {
@@ -105,6 +128,24 @@ public class OrderDetailVO {
 
     public void setStatus(String status) {
         this.status = status;
+    }
+
+    /**
+     * 获取封装的配送收件信息值对象
+     */
+    public DeliveryAddress getDeliveryAddress() {
+        if (receiverName != null || receiverPhone != null || receiverAddress != null) {
+            return new DeliveryAddress(receiverName, receiverPhone, receiverAddress);
+        }
+        return null;
+    }
+
+    public void setDeliveryAddress(DeliveryAddress deliveryAddress) {
+        if (deliveryAddress != null) {
+            this.receiverName = deliveryAddress.getReceiverName();
+            this.receiverPhone = deliveryAddress.getReceiverPhone();
+            this.receiverAddress = deliveryAddress.getReceiverAddress();
+        }
     }
 
     public String getReceiverName() {

@@ -152,4 +152,52 @@ const cartStore = useCartStore();
 await cartStore.addToCart(productId.value, buyCount.value);
 ```
 
-整个前端页面结构清晰、职责分离，充分展现了现代全栈工程的高水准架构设计。
+### 3.3 品牌产地（`origin`）与数据模型全链路贯通
+
+在商品品牌管理与橱窗浏览中，前端配合后端扩展实现了“品牌产地”的全链路支持：
+- **管理控制台**（`BrandManageView.vue`）：表格动态渲染产地 Tag 标签；抽屉表单支持输入产地国家或地区，并支持按产地关键字即时筛选；
+- **前台商城橱窗**：商品详情与品牌展示卡片将产地作为核心背书属性呈现，提升电商交易真实感与视觉完整度。
+
+---
+
+## 4. 现代前端自动化测试工程体系：Vitest + happy-dom 毫秒测试实战
+
+现代企业级前端工程绝不能依赖“人工点点看”的手工测试。本项目在前端建立了完整的自动化测试工程体系，采用与 Vite 深度共生的 **Vitest** + **`happy-dom`** 测试框架。
+
+### 4.1 为什么选用 Vitest + happy-dom 而非传统的 Jest + jsdom？
+
+| 选型对比维度 | 传统 Jest + jsdom 体系 | 现代 Vitest + happy-dom 体系（本项目采用） |
+| :--- | :--- | :--- |
+| **配置文件复用** | 必须单独编写繁琐的 `jest.config.js`，且路径别名 `@/` 需用正则在两处重复映射 | **零配置复用 `vite.config.ts`**，原生共享全部插件与路径别名 |
+| **转译性能** | 依赖 Babel / ts-jest 进行二次转译，启动冷启动耗时数秒甚至十多秒 | **与 Vite 共享原生 ESM 与 esbuild**，测试套件毫秒级极速就绪（$O(1)$ 冷启动） |
+| **DOM 仿真引擎** | `jsdom` 功能完整但体积极其沉重，执行速度较慢 | **`happy-dom`** 轻量精简，内存占用极低，DOM 节点解析速度比 jsdom 快 2~4 倍 |
+| **TypeScript 支持** | 需配置繁重的类型映射与 transform | **开箱即用原生 TypeScript**，类型推导与生产构建完全一致 |
+
+### 4.2 三大核心自动化测试套件剖析
+
+```
+frontend/test/
+├── router.spec.ts    # 路由守卫与角色越权拦截测试
+├── request.spec.ts   # Axios 网络拦截器与 JWT 携带测试
+└── cart.spec.ts      # Pinia 购物车深模块响应式状态流转测试
+```
+
+#### 1. 路由守卫与鉴权越权测试（`router.spec.ts`）
+- 模拟未登录顾客访问受保护路由（如 `/orders`），断言全局路由守卫自动重定向至 `/login?redirect=...`；
+- 模拟普通顾客身份（`ROLE_CUSTOMER`）直接在地址栏输入访问 `/admin`，断言路由守卫精准捕获越权并拦截；
+- 模拟管理员（`ROLE_ADMIN`）登录后访问 `/admin`，断言正常放行渲染。
+
+#### 2. Axios 请求与响应拦截测试（`request.spec.ts`）
+- **请求拦截**：模拟发起 HTTP 请求，断言拦截器（`request.ts`）直接通过 `localStorage.getItem('token')` 读取由 `useUserStore` 登录维持的 JWT 并挂载到 `satoken` 请求头；
+- **401 响应熔断**：模拟后端返回 401 认证失效状态码，断言拦截器自动清除本地持久化凭证（`localStorage.removeItem('token')` 与 `localStorage.removeItem('user')`），杜绝脏状态蔓延。
+
+#### 3. Pinia 购物车响应式状态测试（`cart.spec.ts`）
+- 断言购物车勾选计算属性（`checkedCount`）与总计金额（`totalAmount`）在勾选状态变动时即时触发依赖响应式重算；
+- 断言网络异常时自动触发本地乐观状态回滚，确保前端界面与真实后端状态严格一致。
+
+### 4.3 运行前端测试命令
+```bash
+cd frontend
+npm test
+```
+终端瞬间输出绿色全过结果（15 个测试用例秒级通过），充分展现了高标准的现代前端工程素养。

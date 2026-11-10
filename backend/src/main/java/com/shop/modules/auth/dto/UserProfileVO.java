@@ -13,7 +13,7 @@ public record UserProfileVO(
         @Schema(description = "登录用户名", example = "admin")
         String username,
 
-        @Schema(description = "用户昵称", example = "平台超级管理员")
+        @Schema(description = "用户昵称", example = "系统管理员")
         String nickname,
 
         @Schema(description = "头像图片地址", example = "https://images.unsplash.com/...")

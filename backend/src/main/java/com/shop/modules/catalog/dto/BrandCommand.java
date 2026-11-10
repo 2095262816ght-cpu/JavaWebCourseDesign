@@ -15,6 +15,10 @@ public record BrandCommand(
         @Schema(description = "品牌名称", example = "Apple")
         String name,
 
+        @Size(max = 64, message = "品牌产地最长64个字符")
+        @Schema(description = "品牌产地/国家", example = "美国加利福尼亚")
+        String origin,
+
         @Schema(description = "品牌Logo图片URL", example = "https://...")
         String logo,
 
@@ -29,6 +33,9 @@ public record BrandCommand(
         @Schema(description = "状态 (1: 启用, 0: 禁用)", example = "1")
         Integer status
 ) {
+    public BrandCommand(Long id, String name, String logo, String description, Integer sort, Integer status) {
+        this(id, name, null, logo, description, sort, status);
+    }
     public Integer sortOrDefault() {
         return sort != null ? sort : 0;
     }

@@ -11,6 +11,7 @@ import com.shop.modules.commerce.dto.CartSummaryVO;
 import com.shop.modules.commerce.entity.ShopCartItem;
 import com.shop.modules.commerce.mapper.ShopCartItemMapper;
 import com.shop.modules.commerce.service.CartService;
+import com.shop.modules.commerce.service.ProductBatchLookupHelper;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -19,27 +20,30 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
-import java.util.stream.Collectors;
 
 @Service
 public class CartServiceImpl implements CartService {
 
     private final ShopCartItemMapper cartItemMapper;
     private final ShopProductMapper productMapper;
+    private final ProductBatchLookupHelper productBatchLookupHelper;
 
-    public CartServiceImpl(ShopCartItemMapper cartItemMapper, ShopProductMapper productMapper) {
+    public CartServiceImpl(ShopCartItemMapper cartItemMapper,
+                           ShopProductMapper productMapper,
+                           ProductBatchLookupHelper productBatchLookupHelper) {
         this.cartItemMapper = cartItemMapper;
         this.productMapper = productMapper;
+        this.productBatchLookupHelper = productBatchLookupHelper;
     }
 
     @Override
-    public CartSummaryVO getCart(Long userId) {
-        if (userId == null) {
+    public CartSummaryVO getCart(Long customerId) {
+        if (customerId == null) {
             return new CartSummaryVO(Collections.emptyList(), 0, 0, BigDecimal.ZERO);
         }
 
         LambdaQueryWrapper<ShopCartItem> queryWrapper = new LambdaQueryWrapper<>();
-        queryWrapper.eq(ShopCartItem::getUserId, userId)
+        queryWrapper.eq(ShopCartItem::getCustomerId, customerId)
                 .orderByDesc(ShopCartItem::getCreatedAt);
         List<ShopCartItem> cartItems = cartItemMapper.selectList(queryWrapper);
 
@@ -49,12 +53,9 @@ public class CartServiceImpl implements CartService {
 
         List<Long> productIds = cartItems.stream()
                 .map(ShopCartItem::getProductId)
-                .distinct()
                 .toList();
 
-        List<ShopProduct> products = productMapper.selectBatchIds(productIds);
-        Map<Long, ShopProduct> productMap = products.stream()
-                .collect(Collectors.toMap(ShopProduct::getId, p -> p, (k1, k2) -> k1));
+        Map<Long, ShopProduct> productMap = productBatchLookupHelper.getProductMapByIds(productIds);
 
         List<CartItemVO> voList = new ArrayList<>(cartItems.size());
         int checkedCount = 0;
@@ -64,7 +65,7 @@ public class CartServiceImpl implements CartService {
             ShopProduct product = productMap.get(item.getProductId());
             boolean isProductValid = product != null && product.getIsDeleted() == 0;
             BigDecimal price = (isProductValid && product.getPrice() != null) ? product.getPrice() : BigDecimal.ZERO;
-            BigDecimal subtotal = price.multiply(BigDecimal.valueOf(item.getQuantity()));
+            BigDecimal subtotal = item.calculateSubtotal(price);
             boolean isChecked = Integer.valueOf(1).equals(item.getChecked());
 
             CartItemVO vo = new CartItemVO(
@@ -92,8 +93,8 @@ public class CartServiceImpl implements CartService {
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public void addItem(Long userId, AddCartCommand cmd) {
-        if (userId == null) {
+    public void addItem(Long customerId, AddCartCommand cmd) {
+        if (customerId == null) {
             throw new BusinessException(ResultCode.UNAUTHORIZED);
         }
 
@@ -105,7 +106,7 @@ public class CartServiceImpl implements CartService {
         int addQty = (cmd.getQuantity() != null && cmd.getQuantity() > 0) ? cmd.getQuantity() : 1;
 
         LambdaQueryWrapper<ShopCartItem> queryWrapper = new LambdaQueryWrapper<>();
-        queryWrapper.eq(ShopCartItem::getUserId, userId)
+        queryWrapper.eq(ShopCartItem::getCustomerId, customerId)
                 .eq(ShopCartItem::getProductId, cmd.getProductId());
         ShopCartItem existing = cartItemMapper.selectOne(queryWrapper);
 
@@ -122,7 +123,7 @@ public class CartServiceImpl implements CartService {
             cartItemMapper.updateById(existing);
         } else {
             ShopCartItem newItem = new ShopCartItem();
-            newItem.setUserId(userId);
+            newItem.setCustomerId(customerId);
             newItem.setProductId(cmd.getProductId());
             newItem.setQuantity(targetQty);
             newItem.setChecked(1);
@@ -132,13 +133,13 @@ public class CartServiceImpl implements CartService {
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public void updateItem(Long userId, Long cartItemId, Integer quantity, Boolean checked) {
-        if (userId == null) {
+    public void updateItem(Long customerId, Long cartItemId, Integer quantity, Boolean checked) {
+        if (customerId == null) {
             throw new BusinessException(ResultCode.UNAUTHORIZED);
         }
 
         ShopCartItem item = cartItemMapper.selectById(cartItemId);
-        if (item == null || !userId.equals(item.getUserId())) {
+        if (item == null || !customerId.equals(item.getCustomerId())) {
             throw new BusinessException(ResultCode.NOT_FOUND.getCode(), "未找到该购物车记录");
         }
 
@@ -162,26 +163,26 @@ public class CartServiceImpl implements CartService {
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public void removeItem(Long userId, Long cartItemId) {
-        if (userId == null) {
+    public void removeItem(Long customerId, Long cartItemId) {
+        if (customerId == null) {
             throw new BusinessException(ResultCode.UNAUTHORIZED);
         }
 
         ShopCartItem item = cartItemMapper.selectById(cartItemId);
-        if (item != null && userId.equals(item.getUserId())) {
+        if (item != null && customerId.equals(item.getCustomerId())) {
             cartItemMapper.deleteById(cartItemId);
         }
     }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public void clearCart(Long userId) {
-        if (userId == null) {
+    public void clearCart(Long customerId) {
+        if (customerId == null) {
             throw new BusinessException(ResultCode.UNAUTHORIZED);
         }
 
         LambdaQueryWrapper<ShopCartItem> queryWrapper = new LambdaQueryWrapper<>();
-        queryWrapper.eq(ShopCartItem::getUserId, userId);
+        queryWrapper.eq(ShopCartItem::getCustomerId, customerId);
         cartItemMapper.delete(queryWrapper);
     }
 }

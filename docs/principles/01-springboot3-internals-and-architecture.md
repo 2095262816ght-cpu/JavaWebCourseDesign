@@ -89,16 +89,22 @@ public class OrderCheckoutServiceImpl implements OrderCheckoutService {
     private final ShopProductMapper productMapper;
     private final ShopOrderMapper orderMapper;
     private final ShopOrderItemMapper orderItemMapper;
+    private final ProductBatchLookupHelper productBatchLookupHelper;
+    private final StringRedisTemplate redisTemplate;
 
     // 显式构造函数注入：依赖清晰、编译期保证不可变性
     public OrderCheckoutServiceImpl(ShopCartItemMapper cartItemMapper,
                                     ShopProductMapper productMapper,
                                     ShopOrderMapper orderMapper,
-                                    ShopOrderItemMapper orderItemMapper) {
+                                    ShopOrderItemMapper orderItemMapper,
+                                    ProductBatchLookupHelper productBatchLookupHelper,
+                                    StringRedisTemplate redisTemplate) {
         this.cartItemMapper = cartItemMapper;
         this.productMapper = productMapper;
         this.orderMapper = orderMapper;
         this.orderItemMapper = orderItemMapper;
+        this.productBatchLookupHelper = productBatchLookupHelper;
+        this.redisTemplate = redisTemplate;
     }
     // ...
 }
@@ -157,26 +163,52 @@ public Result checkout(@RequestBody CheckoutDTO dto) {
 
 #### 本项目深模块实践：`OrderCheckoutService`
 
-在本项目中，`OrderCheckoutService` 接口仅定义了极简的方法契约：
+在本项目中，`OrderCheckoutService` 接口仅定义了极简的方法契约（严格遵循 DDD 统一语言规范，以 `customerId` 消除与通用用户概念的二义性）：
 ```java
 public interface OrderCheckoutService {
-    OrderCheckoutResult checkout(Long userId, CheckoutCommand cmd);
-    void pay(Long userId, String orderNo);
-    PageResult<OrderSummaryVO> listCustomerOrders(Long userId, PageQuery query);
-    OrderDetailVO getOrderDetail(Long userId, Long orderId);
+    OrderCheckoutResult checkout(Long customerId, CheckoutCommand cmd);
+    void pay(Long customerId, String orderNo);
+    PageResult<OrderSummaryVO> listCustomerOrders(Long customerId, int pageNum, int pageSize);
+    OrderDetailVO getOrderDetail(Long customerId, Long orderId);
     void markShipped(Long orderId);
 }
 ```
 
-在单一的 `checkout()` 调用背后，深模块对调用方完全封装并原子处理了 **5 重核心复杂性**：
-1. **自动过滤筛选**：根据 `userId` 提取购物车内用户勾选的商品项；
-2. **原子条件防超卖扣减**：单条带状态条件的 SQL 扣减库存，拦截零库存并发穿透；
-3. **不可变快照生成**：订单项（`shop_order_item`）直接冻结当时的商品名、价格、图片，隔离商家后续调价风险；
-4. **事务强一致性**：`@Transactional` 确保订单主表、明细表、库存扣减、购物车清理处于同一原子事务内；
-5. **购物车物理清理**：结算成功后精准删除已下单的购物车条目。
+在单一的 `checkout()` 调用背后，深模块对调用方完全封装并原子处理了 **6 重核心复杂性**：
+1. **自动过滤筛选**：根据 `customerId` 提取购物车内用户勾选的商品项；
+2. **批处理高性能检索引擎**：委托 `ProductBatchLookupHelper` 一次性批量加载全部关联商品并做一致性校验，消除循环单条查询（N+1 查询）；
+3. **原子条件防超卖扣减**：单条带状态条件的 SQL 扣减库存，拦截零库存并发穿透；
+4. **不可变快照生成**：订单项（`shop_order_item`）直接冻结当时的商品名、价格、图片，隔离商家后续调价风险；
+5. **事务强一致性与缓存精准淘汰**：`@Transactional` 确保主表、明细表、库存扣减、购物车清理处于同一原子事务内；扣减成功即刻淘汰商品详情与首页橱窗缓存，并通过 `TransactionSynchronization.afterCommit` 钩子在事务提交后二次淘汰；
+6. **购物车物理清理**：结算成功后精准删除已下单的购物车条目。
 
 ### 3.3 架构深度自测：Deletion Test（删除测试）
 > [!TIP]
 > **衡量一个模块是否有价值的黄金法则 —— 删除测试**：
 > 假设你删掉该 Service，如果整个系统的并发扣减、不可变快照、事务一致性瞬间四散在各个 Controller 里变得支离破碎，那么这个 Service 就是具有极高技术杠杆的**真深模块**。
 > 本项目的 `OrderCheckoutService`、`BrandServiceImpl`（封装 Redis 读穿透与主动淘汰）、`LocalStorageService`（封装路径校验与文件安全落地）均完美通过此测试。
+
+---
+
+## 4. 领域驱动设计（DDD）与代码坏味道重构实战
+
+在追求“高内聚、低耦合”的软件工程实践中，本项目进一步治理了 Martin Fowler《重构》中指出的经典代码坏味道（Code Smells）：
+
+### 4.1 数据泥团（Data Clumps）重构：引入 `DeliveryAddress` 值对象
+- **坏味道**：在 `ShopOrder`、`CheckoutCommand`、`OrderSummaryVO`、`OrderDetailVO` 中，`receiverName`、`receiverPhone`、`receiverAddress` 三个字段总是形影不离地成团出现。
+- **重构方案**：将三者封装为不可变的值对象（Value Object）—— [`DeliveryAddress`](file:///D:/JavaWeb/backend/src/main/java/com/shop/modules/commerce/dto/DeliveryAddress.java)。
+- **收益**：
+  1. 概念更完整：收货信息作为一个业务原子概念流转；
+  2. 防御性空指针安全：内置非破坏性 setter，当传入 `null` 时不破坏既有数据；提供 `isValid()` 统一校验业务完整性。
+
+### 4.2 特性依恋（Feature Envy）重构：行为回归充血实体
+- **坏味道**：初学者常在 Service 层循环遍历并手动计算 `item.getUnitPrice().multiply(BigDecimal.valueOf(item.getQuantity()))`，业务逻辑过分依赖外部实体的内部数据。
+- **重构方案**：将金额小计计算逻辑下沉至实体自身：
+  - `ShopCartItem.calculateSubtotal(unitPrice)`：根据传入的商品实时单价计算购物车行小计；
+  - `ShopOrderItem.calculateSubtotal()`：根据快照单价计算订单明细小计。
+- **收益**：Service 层只负责流程编排，实体类拥有核心计算能力，摆脱贫血模型（Anemic Model）。
+
+### 4.3 重复逻辑抽离（Duplicated Code）：`ProductBatchLookupHelper`
+- **坏味道**：购物车核算与下单结算均需要：从 CartItem 列表提取 ProductId 集合、批量查询商品列表、将其转化为 `Map<Long, ShopProduct>`、校验商品是否存在且上架。
+- **重构方案**：抽取独立的深模块助手类 [`ProductBatchLookupHelper`](file:///D:/JavaWeb/backend/src/main/java/com/shop/modules/commerce/service/ProductBatchLookupHelper.java)。
+- **收益**：购物车服务与订单服务共享同一套高性能批处理逻辑，彻底消除重复代码与潜在的空指针漏判。

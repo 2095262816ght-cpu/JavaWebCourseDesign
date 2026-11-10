@@ -256,6 +256,11 @@ add_header Referrer-Policy "strict-origin-when-cross-origin" always;
 
 ## 7. 一键极速部署与持续运维手册
 
+> [!NOTE]
+> **本地开发 vs. 生产上线模式区分**：
+> - **本地开发环境**：直接运行根目录下的 [`start.bat`](file:///D:/JavaWeb/start.bat)（或 `.\start.ps1`），即可拉起热更新的前端 Vite 与后端 Spring Boot 开发服务；开发结束执行 [`stop.bat`](file:///D:/JavaWeb/stop.bat) 释放端口；
+> - **生产云端环境**：采用下述完整的 Docker 容器化编排与隔离方案，托管于 `deploy/` 目录中。
+
 项目配套了全自动 Linux 部署脚本 [`deploy/scripts/deploy.sh`](file:///D:/JavaWeb/deploy/scripts/deploy.sh) 与 Windows 批处理脚本 [`deploy/scripts/deploy.bat`](file:///D:/JavaWeb/deploy/scripts/deploy.bat)。
 
 ### 7.1 首次极速上线（仅需 3 步）

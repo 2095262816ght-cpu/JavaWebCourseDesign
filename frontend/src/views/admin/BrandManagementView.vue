@@ -70,9 +70,16 @@
           </template>
         </el-table-column>
 
-        <el-table-column prop="name" label="品牌名称" width="180">
+        <el-table-column prop="name" label="品牌名称" width="160">
           <template #default="{ row }">
             <span class="brand-name-text">{{ row.name }}</span>
+          </template>
+        </el-table-column>
+
+        <el-table-column prop="origin" label="品牌产地" width="140" align="center">
+          <template #default="{ row }">
+            <el-tag v-if="row.origin" type="info" size="small">{{ row.origin }}</el-tag>
+            <span v-else style="color: #9ca3af; font-size: 12px;">未设置</span>
           </template>
         </el-table-column>
 
@@ -138,6 +145,10 @@
       >
         <el-form-item label="品牌名称" prop="name">
           <el-input v-model="formData.name" placeholder="请输入品牌名称，如 Apple" maxlength="64" />
+        </el-form-item>
+
+        <el-form-item label="品牌产地" prop="origin">
+          <el-input v-model="formData.origin" placeholder="请输入品牌原产国/产地，如 美国加利福尼亚" maxlength="64" clearable />
         </el-form-item>
 
         <el-form-item label="品牌徽标" prop="logo">
@@ -240,6 +251,7 @@ const currentEditId = ref<number | null>(null)
 
 const formData = reactive<BrandCommand>({
   name: '',
+  origin: '',
   logo: '',
   description: '',
   sort: 1,
@@ -340,6 +352,7 @@ const openCreateDialog = () => {
   dialogMode.value = 'create'
   currentEditId.value = null
   formData.name = ''
+  formData.origin = ''
   formData.logo = ''
   formData.description = ''
   formData.sort = 1
@@ -351,6 +364,7 @@ const openEditDialog = (row: Brand) => {
   dialogMode.value = 'edit'
   currentEditId.value = row.id
   formData.name = row.name
+  formData.origin = row.origin || ''
   formData.logo = row.logo || ''
   formData.description = row.description || ''
   formData.sort = row.sort

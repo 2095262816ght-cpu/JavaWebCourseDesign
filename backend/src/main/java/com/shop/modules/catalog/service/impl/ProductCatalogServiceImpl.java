@@ -213,6 +213,7 @@ public class ProductCatalogServiceImpl implements ProductCatalogService {
                 product.getBrandId(),
                 brand != null ? brand.getName() : "品牌",
                 brand != null ? brand.getLogo() : null,
+                brand != null ? brand.getOrigin() : null,
                 product.getCategoryId(),
                 category != null ? category.getName() : "分类",
                 product.getName(),

@@ -6,6 +6,7 @@ export interface Brand {
   name: string
   logo: string | null
   description: string | null
+  origin?: string | null
   sort: number
   status: number
   createdAt?: string
@@ -17,6 +18,7 @@ export interface BrandCommand {
   name: string
   logo?: string | null
   description?: string | null
+  origin?: string | null
   sort?: number
   status: number
 }

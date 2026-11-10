@@ -56,38 +56,48 @@ class BrandServiceTest {
     }
 
     @Test
-    @DisplayName("测试品牌多条件分页检索")
+    @DisplayName("测试品牌多条件分页检索及不同分页尺寸缓存隔离")
     void testListBrands() {
-        // 1. 无条件第一页查询
-        BrandQuery query = new BrandQuery(1, 5, null, null);
-        PageResult<BrandVO> page1 = brandService.listBrands(query);
-        assertThat(page1.records()).isNotEmpty();
-        assertThat(page1.size()).isEqualTo(5);
+        // 1. 无条件第一页查询 (size=2)
+        BrandQuery query2 = new BrandQuery(1, 2, null, null);
+        PageResult<BrandVO> page2 = brandService.listBrands(query2);
+        assertThat(page2.records()).hasSize(2);
+        assertThat(page2.size()).isEqualTo(2);
 
-        // 2. 关键词模糊匹配 (Apple)
+        // 2. 无条件第一页查询 (size=4)，确保不与 size=2 产生缓存碰撞
+        BrandQuery query4 = new BrandQuery(1, 4, null, null);
+        PageResult<BrandVO> page4 = brandService.listBrands(query4);
+        assertThat(page4.records()).hasSize(4);
+        assertThat(page4.size()).isEqualTo(4);
+
+        // 3. 关键词模糊匹配 (Apple)
         BrandQuery kwQuery = new BrandQuery(1, 10, "Apple", null);
         PageResult<BrandVO> appleResult = brandService.listBrands(kwQuery);
         assertThat(appleResult.records()).isNotEmpty();
         assertThat(appleResult.records().get(0).name()).contains("Apple");
 
-        // 3. 状态过滤
+        // 4. 状态过滤
         BrandQuery statusQuery = new BrandQuery(1, 10, null, 1);
         PageResult<BrandVO> activeResult = brandService.listBrands(statusQuery);
         assertThat(activeResult.records()).allMatch(b -> b.status() == 1);
     }
 
     @Test
-    @DisplayName("测试品牌新增与更新并清除推荐缓存")
+    @DisplayName("测试品牌新增与更新并清除推荐与列表缓存")
     void testSaveBrandEvictsCache() {
         // 预热缓存
         brandService.getFeaturedBrands(6);
-        String cacheKey = BrandServiceImpl.BRAND_FEATURED_CACHE_PREFIX + 6;
-        assertThat(redisTemplate.hasKey(cacheKey)).isTrue();
+        brandService.listBrands(new BrandQuery(1, 10, null, null));
+        String featuredKey = BrandServiceImpl.BRAND_FEATURED_CACHE_PREFIX + 6;
+        String allKey = BrandServiceImpl.BRAND_ALL_CACHE_KEY;
+        assertThat(redisTemplate.hasKey(featuredKey)).isTrue();
+        assertThat(redisTemplate.hasKey(allKey)).isTrue();
 
-        // 新增品牌
+        // 新增品牌（包含产地字段）
         BrandCommand newBrand = new BrandCommand(
                 null,
                 "Tesla",
+                "美国德克萨斯",
                 "https://images.unsplash.com/photo-tesla",
                 "加速全球向可持续能源的转变",
                 10,
@@ -95,7 +105,13 @@ class BrandServiceTest {
         );
         brandService.saveBrand(newBrand);
 
+        // 验证产地保存正确
+        PageResult<BrandVO> teslaResult = brandService.listBrands(new BrandQuery(1, 10, "Tesla", null));
+        assertThat(teslaResult.records()).isNotEmpty();
+        assertThat(teslaResult.records().get(0).origin()).isEqualTo("美国德克萨斯");
+
         // 验证缓存已被清除
-        assertThat(redisTemplate.hasKey(cacheKey)).isFalse();
+        assertThat(redisTemplate.hasKey(featuredKey)).isFalse();
+        assertThat(redisTemplate.hasKey(allKey)).isFalse();
     }
 }

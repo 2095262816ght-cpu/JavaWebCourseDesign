@@ -54,6 +54,16 @@ public class ShopOrderItem implements Serializable {
         this.totalPrice = totalPrice;
     }
 
+    /**
+     * 计算该订单行项金额小计 (消除 Feature Envy)
+     */
+    public BigDecimal calculateSubtotal() {
+        if (this.unitPrice == null || this.quantity == null) {
+            return BigDecimal.ZERO;
+        }
+        return this.unitPrice.multiply(BigDecimal.valueOf(this.quantity));
+    }
+
     public Long getId() {
         return id;
     }

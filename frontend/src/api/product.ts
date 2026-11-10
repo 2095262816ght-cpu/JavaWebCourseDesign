@@ -31,6 +31,7 @@ export interface ProductDetail {
   brandId: number
   brandName: string
   brandLogo?: string
+  brandOrigin?: string
   categoryId: number
   categoryName: string
   name: string
@@ -121,21 +122,21 @@ export interface PageResult<T> {
  * 首页聚合橱窗接口 (单次网络调用返回轮播、分类、品牌、新品及热卖)
  */
 export function getHomeShowcaseApi() {
-  return request.get<any, HomeShowcase>('/portal/home')
+  return request.get<any, HomeShowcase>('/api/portal/home')
 }
 
 /**
  * 前台商品多维组合检索
  */
 export function searchProductsApi(params: ProductQuery) {
-  return request.get<any, PageResult<ProductCard>>('/portal/products', { params })
+  return request.get<any, PageResult<ProductCard>>('/api/portal/products', { params })
 }
 
 /**
  * 前台商品详情查询
  */
 export function getProductDetailApi(id: number) {
-  return request.get<any, ProductDetail>(`/portal/products/${id}`)
+  return request.get<any, ProductDetail>(`/api/portal/products/${id}`)
 }
 
 // ----------------- Backoffice Admin APIs -----------------
@@ -144,35 +145,35 @@ export function getProductDetailApi(id: number) {
  * 管理后台多条件分页查询商品
  */
 export function listAdminProductsApi(params: AdminProductQuery) {
-  return request.get<any, PageResult<ProductAdminVO>>('/admin/products', { params })
+  return request.get<any, PageResult<ProductAdminVO>>('/api/admin/products', { params })
 }
 
 /**
  * 管理后台查询商品详情
  */
 export function getAdminProductApi(id: number) {
-  return request.get<any, ProductAdminVO>(`/admin/products/${id}`)
+  return request.get<any, ProductAdminVO>(`/api/admin/products/${id}`)
 }
 
 /**
  * 管理后台新建商品
  */
 export function createProductApi(data: ProductCommand) {
-  return request.post<any, number>('/admin/products', data)
+  return request.post<any, number>('/api/admin/products', data)
 }
 
 /**
  * 管理后台修改商品
  */
 export function updateProductApi(id: number, data: ProductCommand) {
-  return request.put<any, void>(`/admin/products/${id}`, data)
+  return request.put<any, void>(`/api/admin/products/${id}`, data)
 }
 
 /**
  * 管理后台快速修改上下架状态
  */
 export function updateProductStatusApi(id: number, status: number) {
-  return request.patch<any, void>(`/admin/products/${id}/status`, null, {
+  return request.patch<any, void>(`/api/admin/products/${id}/status`, null, {
     params: { status }
   })
 }
@@ -181,5 +182,5 @@ export function updateProductStatusApi(id: number, status: number) {
  * 管理后台删除商品
  */
 export function deleteProductApi(id: number) {
-  return request.delete<any, void>(`/admin/products/${id}`)
+  return request.delete<any, void>(`/api/admin/products/${id}`)
 }

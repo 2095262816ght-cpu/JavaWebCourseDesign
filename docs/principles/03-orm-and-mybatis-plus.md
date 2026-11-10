@@ -119,11 +119,50 @@ public MetaObjectHandler metaObjectHandler() {
 
 ---
 
-## 4. MySQL InnoDB 底层存储引擎与 B+ 树索引设计
+## 4. ORM 映射与领域驱动（DDD）高级实践
+
+ORM（对象关系映射）的核心价值绝不仅限于“把表映射成 JavaBean”，更在于**在物理数据库表结构与整洁的领域模型之间建立防腐层（Anticorruption Layer）**。
+
+### 4.1 物理列名与领域通用语言解耦：`@TableField` 映射 `customerId`
+- **问题背景**：数据库历史表设计中，外键通常被习惯性命名为 `user_id`。然而在电商交易领域，操作购物车和下达订单的核心主体是 **顾客（Customer）**，如果 Java 代码中到处充斥着泛化的 `userId`，极易与系统管理人员（Administrator）发生概念混淆。
+- **MyBatis-Plus 解耦方案**：
+  在 [`ShopCartItem`](file:///D:/JavaWeb/backend/src/main/java/com/shop/modules/commerce/entity/ShopCartItem.java) 与 [`ShopOrder`](file:///D:/JavaWeb/backend/src/main/java/com/shop/modules/commerce/entity/ShopOrder.java) 实体中，我们通过显式声明 `@TableField("user_id")`，将数据库底层列名与 Java 领域模型属性名优雅解耦：
+  ```java
+  @TableField("user_id")
+  private Long customerId;
+  ```
+- **收益**：无需执行高风险的数据库物理列重命名 DDL，即可在上层 Java 领域逻辑中享受无二义性的领域通用语言（Ubiquitous Language）。
+
+### 4.2 实体属性扩展与动态映射：`ShopBrand` 产地（`origin`）
+- 在品牌模块扩展中，数据库 `shop_brand` 新增产地列：
+  ```sql
+  origin VARCHAR(64) DEFAULT NULL COMMENT 'Brand Origin / Country';
+  ```
+- 实体类 [`ShopBrand`](file:///D:/JavaWeb/backend/src/main/java/com/shop/modules/catalog/entity/ShopBrand.java) 对应扩展：
+  ```java
+  @TableField("origin")
+  private String origin;
+  ```
+- MyBatis-Plus 单表 CRUD 自动识别并纳入动态 SQL 字段构建，无论是后台品牌新增/修改，还是前台按产地筛选展示，均零样板代码即刻生效。
+
+### 4.3 消除数据泥团（Data Clumps）：`DeliveryAddress` 值对象映射
+在 `ShopOrder` 中，收件人、联系手机、收货地址属于强关联的一组物理属性。我们将其封装为 [`DeliveryAddress`](file:///D:/JavaWeb/backend/src/main/java/com/shop/modules/commerce/dto/DeliveryAddress.java) 值对象：
+- 在订单主表实体内部，通过 Getter/Setter 协调拍平属性与结构化值对象的映射；
+- 提供非破坏性 Setter（防止 `null` 覆盖既有数据），对外暴露纯粹的充血值对象契约。
+
+### 4.4 领域充血实体行为：`calculateSubtotal()` 计算逻辑内聚
+坚决摒弃初学者将业务实体仅视作 getter/setter 容器的“贫血模型（Anemic Domain Model）”反模式：
+- `ShopCartItem.calculateSubtotal(unitPrice)`：根据传入的商品实时单价计算行小计；
+- `ShopOrderItem.calculateSubtotal()`：根据快照单价计算明细小计；
+- 计算逻辑完全内聚于实体，彻底消除了 Service 层的“特性依恋（Feature Envy）”坏味道。
+
+---
+
+## 5. MySQL InnoDB 底层存储引擎与 B+ 树索引设计
 
 数据库性能的上限由物理存储引擎的磁盘 I/O 模型决定。MySQL 8.4 默认采用 **InnoDB 存储引擎**，其索引组织形式为经典的 **B+ Tree（平衡多路查找树）**。
 
-### 4.1 B+ 树核心物理结构
+### 5.1 B+ 树核心物理结构
 
 ```
                           [ 根节点 Page (仅存储索引键与指针) ]
@@ -145,7 +184,7 @@ public MetaObjectHandler metaObjectHandler() {
 3. **全叶子节点双向链表，范围查询极致优化**：
    - 所有叶子节点按键值顺序排列，并通过双向链表串联。当执行 `BETWEEN` 或分页 `LIMIT` 时，只需定位到起始叶子节点，顺着链表顺序遍历即可，完全避免在树中来回回溯。
 
-### 4.2 聚簇索引 vs. 二级索引与“回表”成本
+### 5.2 聚簇索引 vs. 二级索引与“回表”成本
 
 - **聚簇索引（Clustered Index）**：以主键（`PRIMARY KEY id`）构建的 B+ 树，叶子节点直接存放整行物理记录（Row Data）。每张表有且仅能有一个聚簇索引。
 - **二级索引 / 辅助索引（Secondary Index）**：如我们在 `shop_product` 表中建立的 `idx_category (category_id)`，其叶子节点不存放行数据，而是存放**主键 ID**。
@@ -155,7 +194,7 @@ public MetaObjectHandler metaObjectHandler() {
 
 ---
 
-## 5. MySQL ACID 事务特性与底层实现基石
+## 6. MySQL ACID 事务特性与底层实现基石
 
 在电商订单结算闭环中（`OrderCheckoutServiceImpl.checkout()`），必须确保“生成订单、扣减库存、创建快照、清理购物车”作为一个不可分割的整体执行。这由数据库的 **ACID 特性** 全权保障：
 
@@ -173,17 +212,17 @@ public MetaObjectHandler metaObjectHandler() {
                                 [ 一致性 (C) ] (最终目标)
 ```
 
-### 5.1 原子性（Atomicity）与 Undo Log
+### 6.1 原子性（Atomicity）与 Undo Log
 - **实现手段**：`Undo Log`（回滚日志）。
 - **机理**：每当事务执行 `INSERT` 时，Undo Log 记录对应的 `DELETE`；执行 `UPDATE` 时，Undo Log 记录变更前的数据旧版本。
 - **回滚保障**：如果结算过程中发生库存不足（`affectedRows == 0`）并抛出 `BusinessException`，Spring `@Transactional` 触发回滚指令，InnoDB 逆向执行 Undo Log 中的相反操作，将所有修改过的数据无痕还原至事务开始前的状态。
 
-### 5.2 持久性（Durability）与 Redo Log（WAL 预写日志策略）
+### 6.2 持久性（Durability）与 Redo Log（WAL 预写日志策略）
 - **实现手段**：`Redo Log`（重做日志）与 **WAL（Write-Ahead Logging）策略**。
 - **机理**：如果事务每次提交都必须将磁盘上对应的 16KB 数据页进行随机 I/O 落盘，数据库吞吐量将遭受灾难性暴跌。
 - **解决方案**：事务提交时，仅需将数据变更以追加写（Sequential Append）的形式记录到顺序写入的 `Redo Log Buffer` 并立即刷盘，而内存中的脏页（Buffer Pool）后续由后台线程异步刷新到磁盘数据文件中。即便在刷盘前机器意外断电，重启时 MySQL 依然能通过 Redo Log 重新执行重做操作，确保已提交事务的数据永不丢失。
 
-### 5.3 隔离性（Isolation）与 MVCC（多版本并发控制）
+### 6.3 隔离性（Isolation）与 MVCC（多版本并发控制）
 - **实现手段**：**MVCC（Multi-Version Concurrency Control）+ 记录锁/间隙锁**。
 - MySQL 默认隔离级别为 `REPEATABLE READ`（可重复读）。
 - **快照读与当前读解耦**：
