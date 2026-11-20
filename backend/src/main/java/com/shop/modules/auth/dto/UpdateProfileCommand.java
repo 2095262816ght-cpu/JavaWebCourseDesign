@@ -16,7 +16,7 @@ public record UpdateProfileCommand(
         String oldPassword,
 
         @Schema(description = "新密码 (若需要修改密码时必填，6-32位)")
-        @Size(min = 6, max = 32, message = "新密码长度须在6至32位之间")
+        @Size(max = 32, message = "新密码长度最多32位")
         String newPassword
 ) {
 }

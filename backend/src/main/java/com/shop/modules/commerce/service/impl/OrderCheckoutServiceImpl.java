@@ -2,6 +2,7 @@ package com.shop.modules.commerce.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.shop.common.cache.TransactionalCacheEvictor;
 import com.shop.common.exception.BusinessException;
 import com.shop.common.result.PageResult;
 import com.shop.common.result.ResultCode;
@@ -27,8 +28,6 @@ import org.slf4j.LoggerFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.transaction.support.TransactionSynchronization;
-import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.util.StringUtils;
 
 import java.math.BigDecimal;
@@ -95,7 +94,7 @@ public class OrderCheckoutServiceImpl implements OrderCheckoutService {
         BigDecimal totalAmount = BigDecimal.ZERO;
         for (ShopCartItem item : cartItems) {
             ShopProduct product = productMap.get(item.getProductId());
-            if (product == null || product.getIsDeleted() == 1 || !Integer.valueOf(1).equals(product.getStatus())) {
+            if (product == null || Integer.valueOf(1).equals(product.getIsDeleted()) || !Integer.valueOf(1).equals(product.getStatus())) {
                 throw new BusinessException("商品 [" + (product != null ? product.getName() : item.getProductId()) + "] 已下架或不存在");
             }
 
@@ -165,7 +164,7 @@ public class OrderCheckoutServiceImpl implements OrderCheckoutService {
             throw new BusinessException(ResultCode.NOT_FOUND.getCode(), "未找到该订单");
         }
 
-        if (customerId != null && !customerId.equals(order.getCustomerId())) {
+        if (customerId == null || !customerId.equals(order.getCustomerId())) {
             throw new BusinessException(ResultCode.FORBIDDEN.getCode(), "无权操作该订单");
         }
 
@@ -177,27 +176,40 @@ public class OrderCheckoutServiceImpl implements OrderCheckoutService {
             throw new BusinessException("订单当前状态不可支付：" + order.getStatus());
         }
 
-        order.setStatus("PAID");
-        order.setPaymentTime(LocalDateTime.now());
-        orderMapper.updateById(order);
+        // 条件更新抢占状态迁移权：并发支付时只有一个请求能成功写入，避免支付时间被重复覆盖
+        int affectedRows = orderMapper.payUnpaidOrder(order.getId(), LocalDateTime.now());
+        if (affectedRows == 0) {
+            // 条件更新失败说明状态已被并发请求改变，当前读最新状态以保持“已支付即幂等成功”的语义
+            String latestStatus = orderMapper.selectStatusForUpdate(order.getId());
+            if ("PAID".equalsIgnoreCase(latestStatus)) {
+                return;
+            }
+            throw new BusinessException("订单状态已变更，无法支付，请刷新后重试");
+        }
     }
 
     @Override
-    public PageResult<OrderSummaryVO> listCustomerOrders(Long customerId, int pageNum, int pageSize) {
+    public PageResult<OrderSummaryVO> listCustomerOrders(Long customerId, String status, int pageNum, int pageSize) {
+        int safePageNum = Math.max(1, pageNum);
+        int safePageSize = Math.min(100, Math.max(1, pageSize));
         if (customerId == null) {
-            return PageResult.of(pageNum, pageSize, 0L, Collections.emptyList());
+            return PageResult.of(safePageNum, safePageSize, 0L, Collections.emptyList());
         }
 
-        Page<ShopOrder> page = new Page<>(pageNum, pageSize);
+        Page<ShopOrder> page = new Page<>(safePageNum, safePageSize);
         LambdaQueryWrapper<ShopOrder> queryWrapper = new LambdaQueryWrapper<>();
-        queryWrapper.eq(ShopOrder::getCustomerId, customerId)
-                .orderByDesc(ShopOrder::getCreatedAt);
+        queryWrapper.eq(ShopOrder::getCustomerId, customerId);
+        if (StringUtils.hasText(status)) {
+            queryWrapper.eq(ShopOrder::getStatus, status.trim().toUpperCase());
+        }
+        queryWrapper.orderByDesc(ShopOrder::getCreatedAt)
+                .orderByDesc(ShopOrder::getId);
 
         Page<ShopOrder> resultPage = orderMapper.selectPage(page, queryWrapper);
         List<ShopOrder> orders = resultPage.getRecords();
 
         if (orders.isEmpty()) {
-            return PageResult.of(pageNum, pageSize, 0L, Collections.emptyList());
+            return PageResult.of(safePageNum, safePageSize, 0L, Collections.emptyList());
         }
 
         List<OrderSummaryVO> summaryVOList = enrichOrdersWithItems(orders);
@@ -206,6 +218,12 @@ public class OrderCheckoutServiceImpl implements OrderCheckoutService {
 
     @Override
     public OrderDetailVO getOrderDetail(Long customerId, Long orderId) {
+        // 顾客路径强制要求 customerId，并校验订单归属，避免漏传参数退化为无鉴权查询
+        return buildOrderDetail(requireOwnedOrder(customerId, orderId));
+    }
+
+    @Override
+    public OrderDetailVO getAdminOrderDetail(Long orderId) {
         if (orderId == null) {
             throw new BusinessException(ResultCode.BAD_REQUEST.getCode(), "订单ID不能为空");
         }
@@ -215,10 +233,11 @@ public class OrderCheckoutServiceImpl implements OrderCheckoutService {
             throw new BusinessException(ResultCode.NOT_FOUND.getCode(), "订单记录不存在");
         }
 
-        if (customerId != null && !customerId.equals(order.getCustomerId())) {
-            throw new BusinessException(ResultCode.FORBIDDEN.getCode(), "无权查看他人订单");
-        }
+        return buildOrderDetail(order);
+    }
 
+    private OrderDetailVO buildOrderDetail(ShopOrder order) {
+        Long orderId = order.getId();
         LambdaQueryWrapper<ShopOrderItem> itemQuery = new LambdaQueryWrapper<>();
         itemQuery.eq(ShopOrderItem::getOrderId, orderId);
         List<ShopOrderItem> items = orderItemMapper.selectList(itemQuery);
@@ -257,14 +276,95 @@ public class OrderCheckoutServiceImpl implements OrderCheckoutService {
             throw new BusinessException("仅已支付（PAID）订单允许标记发货，当前状态为：" + order.getStatus());
         }
 
-        order.setStatus("SHIPPED");
+        // 条件更新抢占状态迁移权：避免并发发货或与取消操作竞争导致订单状态与库存不一致
+        int affectedRows = orderMapper.shipPaidOrder(orderId);
+        if (affectedRows == 0) {
+            String latestStatus = orderMapper.selectStatusForUpdate(orderId);
+            throw new BusinessException("仅已支付（PAID）订单允许标记发货，当前状态为：" + latestStatus);
+        }
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void confirmReceipt(Long customerId, Long orderId) {
+        ShopOrder order = requireOwnedOrder(customerId, orderId);
+        if (!"SHIPPED".equalsIgnoreCase(order.getStatus())) {
+            throw new BusinessException("仅已发货（SHIPPED）订单允许确认收货，当前状态为：" + order.getStatus());
+        }
+        order.setStatus("COMPLETED");
         orderMapper.updateById(order);
     }
 
     @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void cancelOrder(Long customerId, Long orderId) {
+        cancelAndRestoreStock(requireOwnedOrder(customerId, orderId));
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void cancelOrderByAdmin(Long orderId) {
+        if (orderId == null) {
+            throw new BusinessException(ResultCode.BAD_REQUEST.getCode(), "订单ID不能为空");
+        }
+        ShopOrder order = orderMapper.selectById(orderId);
+        if (order == null) {
+            throw new BusinessException(ResultCode.NOT_FOUND.getCode(), "订单不存在");
+        }
+        cancelAndRestoreStock(order);
+    }
+
+    /**
+     * 取消未发货订单并回补库存：仅 UNPAID / PAID 允许取消，避免已发货订单被回滚造成库存与物流不一致
+     */
+    private void cancelAndRestoreStock(ShopOrder order) {
+        String status = order.getStatus() == null ? "" : order.getStatus().toUpperCase();
+        if (!"UNPAID".equals(status) && !"PAID".equals(status)) {
+            throw new BusinessException("仅未发货订单允许取消，当前状态为：" + order.getStatus());
+        }
+
+        // 先以条件更新抢占状态迁移权：并发取消时只有一个事务能把订单置为 CANCELLED，
+        // 只有抢到的一方回补库存，避免库存被重复归还。
+        int affectedRows = orderMapper.cancelUnshippedOrder(order.getId());
+        if (affectedRows == 0) {
+            throw new BusinessException("订单状态已变更，无法取消，请刷新后重试");
+        }
+
+        List<ShopOrderItem> items = orderItemMapper.selectList(
+                new LambdaQueryWrapper<ShopOrderItem>().eq(ShopOrderItem::getOrderId, order.getId())
+        );
+        for (ShopOrderItem item : items) {
+            if (item.getProductId() == null || item.getQuantity() == null) {
+                continue;
+            }
+            productMapper.incrementStock(item.getProductId(), item.getQuantity());
+            evictProductDetailCache(item.getProductId());
+        }
+    }
+
+    private ShopOrder requireOwnedOrder(Long customerId, Long orderId) {
+        if (customerId == null) {
+            throw new BusinessException(ResultCode.UNAUTHORIZED);
+        }
+        if (orderId == null) {
+            throw new BusinessException(ResultCode.BAD_REQUEST.getCode(), "订单ID不能为空");
+        }
+        ShopOrder order = orderMapper.selectById(orderId);
+        if (order == null) {
+            throw new BusinessException(ResultCode.NOT_FOUND.getCode(), "订单不存在");
+        }
+        if (!customerId.equals(order.getCustomerId())) {
+            throw new BusinessException(ResultCode.FORBIDDEN.getCode(), "无权操作该订单");
+        }
+        return order;
+    }
+
+    @Override
     public PageResult<OrderSummaryVO> listAdminOrders(AdminOrderQuery query) {
-        int pageNum = (query != null && query.getPageNum() != null) ? query.getPageNum() : 1;
-        int pageSize = (query != null && query.getPageSize() != null) ? query.getPageSize() : 10;
+        int rawPageNum = (query != null && query.getPageNum() != null) ? query.getPageNum() : 1;
+        int rawPageSize = (query != null && query.getPageSize() != null) ? query.getPageSize() : 10;
+        int pageNum = Math.max(rawPageNum, 1);
+        int pageSize = (rawPageSize < 1) ? 10 : Math.min(rawPageSize, 100);
 
         Page<ShopOrder> page = new Page<>(pageNum, pageSize);
         LambdaQueryWrapper<ShopOrder> queryWrapper = new LambdaQueryWrapper<>();
@@ -274,13 +374,14 @@ public class OrderCheckoutServiceImpl implements OrderCheckoutService {
                 queryWrapper.like(ShopOrder::getOrderNo, query.getOrderNo().trim());
             }
             if (StringUtils.hasText(query.getStatus())) {
-                queryWrapper.eq(ShopOrder::getStatus, query.getStatus().trim());
+                queryWrapper.eq(ShopOrder::getStatus, query.getStatus().trim().toUpperCase());
             }
             if (StringUtils.hasText(query.getReceiverPhone())) {
                 queryWrapper.like(ShopOrder::getReceiverPhone, query.getReceiverPhone().trim());
             }
         }
-        queryWrapper.orderByDesc(ShopOrder::getCreatedAt);
+        queryWrapper.orderByDesc(ShopOrder::getCreatedAt)
+                .orderByDesc(ShopOrder::getId);
 
         Page<ShopOrder> resultPage = orderMapper.selectPage(page, queryWrapper);
         List<ShopOrder> orders = resultPage.getRecords();
@@ -297,15 +398,7 @@ public class OrderCheckoutServiceImpl implements OrderCheckoutService {
         if (productId == null || redisTemplate == null) {
             return;
         }
-        doEvictProductDetailCache(productId);
-        if (TransactionSynchronizationManager.isSynchronizationActive()) {
-            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-                @Override
-                public void afterCommit() {
-                    doEvictProductDetailCache(productId);
-                }
-            });
-        }
+        TransactionalCacheEvictor.evictNowAndAfterCommit(() -> doEvictProductDetailCache(productId));
     }
 
     private void doEvictProductDetailCache(Long productId) {

@@ -3,14 +3,18 @@ package com.shop.modules.catalog;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.shop.modules.auth.dto.LoginCommand;
 import com.shop.modules.catalog.dto.ProductCommand;
+import com.shop.modules.catalog.service.impl.ProductCatalogServiceImpl;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.util.List;
@@ -27,6 +31,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 @SpringBootTest
 @AutoConfigureMockMvc
+@Transactional
 class ProductControllerTest {
 
     @Autowired
@@ -35,7 +40,15 @@ class ProductControllerTest {
     @Autowired
     private ObjectMapper objectMapper;
 
+    @Autowired
+    private StringRedisTemplate redisTemplate;
+
     private String adminToken;
+
+    @AfterEach
+    void cleanupShowcaseCache() {
+        redisTemplate.delete(ProductCatalogServiceImpl.HOME_SHOWCASE_CACHE_KEY);
+    }
 
     @BeforeEach
     void setupAdminToken() throws Exception {
@@ -169,5 +182,45 @@ class ProductControllerTest {
                         .header("satoken", adminToken))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code", is(200)));
+    }
+
+    @Test
+    @DisplayName("测试商品前后台分页越界钳制 [1,100] 与非法状态值拦截")
+    void testProductPaginationClampingAndStatusValidation() throws Exception {
+        mockMvc.perform(get("/api/portal/products")
+                        .param("pageNum", "0")
+                        .param("pageSize", "999"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code", is(200)))
+                .andExpect(jsonPath("$.data.current", is(1)))
+                .andExpect(jsonPath("$.data.size", is(100)));
+
+        mockMvc.perform(get("/api/admin/products")
+                        .header("satoken", adminToken)
+                        .param("pageNum", "-1")
+                        .param("pageSize", "500"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code", is(200)))
+                .andExpect(jsonPath("$.data.current", is(1)))
+                .andExpect(jsonPath("$.data.size", is(100)));
+
+        ProductCommand invalidProd = new ProductCommand(
+                null, "非法状态测试商品", "副标题", 1L, 5L,
+                "https://images.unsplash.com/test-main.jpg", List.of(),
+                new BigDecimal("199.00"), new BigDecimal("299.00"), 10, 99, "<p>详情</p>"
+        );
+        mockMvc.perform(post("/api/admin/products")
+                        .header("satoken", adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(invalidProd)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code", is(400)));
+
+        mockMvc.perform(patch("/api/admin/products/1/status")
+                        .header("satoken", adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"status\":99}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code", is(400)));
     }
 }

@@ -76,8 +76,8 @@ flowchart TD
 
 ### 2.2 路由级声明式拦截
 在 `com.shop.config.WebMvcConfig` 中：
-- `/api/admin/**`：拦截未授权请求，强制核验 `ROLE_ADMIN`；
-- `/api/cart/**`、`/api/orders/**`、`/api/auth/profile`：强制核验 `StpUtil.checkLogin()`；
+- `/api/admin/**`：先校验登录态与账号启用（`checkActiveUser()`），再强制核验 `ROLE_ADMIN`；
+- `/api/cart/**`、`/api/orders/**`、`/api/auth/profile`、`/api/common/upload`：强制执行 `checkActiveUser()`（登录态 + 账号启用）；
 - 前台公开浏览接口（`/api/portal/**`）与静态资源放行，实现最小权限最小暴露原则。
 
 ### 2.3 动态风控与秒级踢人下线
@@ -125,10 +125,17 @@ flowchart TD
 **本项目的防御方案**：
 1. **服务端绑定登录凭证**：所有顾客端 Controller（`OrderController`、`CartController`）的接口形参中**绝对不接收客户端传入的 `userId` 或 `customerId`**，统一通过 `StpUtil.getLoginIdAsLong()` 从服务端加密线程上下文中提取；
 2. **深度比对资源归属（基于严谨统一的 `customerId`）**：
-   - 订单详情查看：
+   - 订单详情查看、确认收货与取消订单（`OrderCheckoutServiceImpl.requireOwnedOrder`）：
      ```java
-     if (customerId != null && !customerId.equals(order.getCustomerId())) {
-         throw new BusinessException(ResultCode.FORBIDDEN.getCode(), "无权查看或操作该订单");
+     if (customerId == null) {
+         throw new BusinessException(ResultCode.UNAUTHORIZED);
+     }
+     ShopOrder order = orderMapper.selectById(orderId);
+     if (order == null) {
+         throw new BusinessException(ResultCode.NOT_FOUND.getCode(), "订单不存在");
+     }
+     if (!customerId.equals(order.getCustomerId())) {
+         throw new BusinessException(ResultCode.FORBIDDEN.getCode(), "无权操作该订单");
      }
      ```
    - 购物车条目修改/删除：
@@ -159,7 +166,7 @@ flowchart TD
 
 ### 5.2 金额防篡改、不可变快照与收货地址值对象（DeliveryAddress）
 - **金额不可信**：订单总结算金额完全由后端基于数据库中商品的真实单价和购买数量重算（委托 `ShopCartItem.calculateSubtotal()` 充血实体计算），客户端传来的任何价格均直接忽略；
-- **收货地址值对象模式（`DeliveryAddress`）**：将收件人姓名、电话和地址封装为不可变的值对象，杜绝多字段数据泥团并提供防穿透校验；
+- **收货地址值对象模式（`DeliveryAddress`）**：将收件人姓名、电话和地址封装为高内聚的值对象（保留非破坏性 setter，构造器与 setter 统一 `trim()`），杜绝多字段数据泥团并提供防穿透校验；
 - **不可变商品快照**：下单时将商品当时的名称、单价、主图深拷贝持久化至 `shop_order_item`。商家后续修改标题、降价或删除商品，历史订单数据均不会被篡改，保证法律效力与审计严肃性。
 
 ---
@@ -170,18 +177,19 @@ flowchart TD
 - 单表查询使用 MyBatis-Plus `LambdaQueryWrapper`，通过 `SysUser::getUsername` 在编译期强类型绑定字段；
 - 自定义 SQL 采用 JDBC 预编译占位符 `#{}`，彻底阻断 SQL 注入。
 
-### 6.2 文件上传 4 重沙箱防御（`LocalStorageService`）
-1. **路径净化**：`StringUtils.cleanPath()` 过滤非法符号；
-2. **检测路径穿越**：`if (storedFilename.contains("..")) throw BusinessException;`
-3. **绝对路径沙箱比对**：
+### 6.2 文件上传多重沙箱防御（`LocalStorageService`）
+1. **类型白名单**：仅允许 `.jpg/.jpeg/.png/.gif/.webp/.bmp/.ico`，并显式拒绝 SVG，避免上传可执行脚本；
+2. **路径净化**：`StringUtils.cleanPath()` 过滤非法符号；
+3. **检测路径穿越**：`if (storedFilename.contains("..")) throw BusinessException;`
+4. **绝对路径沙箱比对**：
    ```java
    Path destinationFile = this.rootLocation.resolve(storedFilename).normalize().toAbsolutePath();
    if (!destinationFile.getParent().equals(this.rootLocation.toAbsolutePath())) {
        throw new BusinessException("禁止保存至存储根目录之外");
    }
    ```
-4. **随机 UUID 重命名**：避免文件名覆盖和木马脚本执行；
-5. **体积上限约束**：`application.yml` 限制单文件 10MB、总请求 20MB，防止恶意 DoS。
+5. **随机 UUID 重命名**：避免文件名覆盖和木马脚本执行；
+6. **体积上限约束**：`application.yml` 限制单文件 10MB、总请求 20MB，防止恶意 DoS。
 
 ---
 
@@ -320,7 +328,7 @@ server {
 ### 考问 2：高并发秒杀场景下，系统是如何彻底避免库存‘超卖’和负库存的？
 > **满分回答话术**：  
 > “老师，我们坚决摒弃了应用层‘查后更新’的并发竞态反模式，采用的是**单条带状态条件的原子 SQL 扣减**方案（`ShopProductMapper.decrementStock`）：  
-> `UPDATE shop_product SET stock = stock - #{quantity} WHERE id = #{id} AND stock >= #{quantity} AND is_deleted = 0;`  
+> `UPDATE shop_product SET stock = stock - #{quantity} WHERE id = #{productId} AND stock >= #{quantity} AND is_deleted = 0;`  
 > 结合 MySQL InnoDB 行级排他锁，所有并发请求在数据库内核层面自动排队。当库存不足时受影响行数为 0，后端在 `OrderCheckoutServiceImpl` 中判断若影响行数为 0，立即抛出业务异常触发 Spring 事务整体回滚，绝无超卖风险。我们还专门编写了 10 线程并发压测用例 `OrderConcurrencyTest` 进行断言验证。”
 
 ---
@@ -329,7 +337,7 @@ server {
 > **满分回答话术**：  
 > “水平越权是指同级别权限的用户通过篡改资源 ID 访问或修改他人数据。本项目的防御体现在两个层面：  
 > 1. **入口凭据信任度**：在所有涉及个人私有数据的 Controller 中，形参绝对不接收前端传入的 `customerId`，而是直接通过 `StpUtil.getLoginIdAsLong()` 从服务端加密 Token 上下文提取；  
-> 2. **数据访问所有权严格校验**：在订单查询、支付和购物车修改等 Service 中，统一使用无二义性的 `customerId` 领域属性，取出数据后第一件事就是校验 `if (!customerId.equals(resource.getCustomerId())) throw ForbiddenException;`，彻底从业务逻辑层封死水平越权漏洞。”
+> 2. **数据访问所有权严格校验**：在订单查询、支付和购物车修改等 Service 中，统一使用无二义性的 `customerId` 领域属性，取出数据后第一件事就是校验 `if (!customerId.equals(resource.getCustomerId()))` 并立即抛出 `403` 业务异常拦截，彻底从业务逻辑层封死水平越权漏洞。”
 
 ---
 

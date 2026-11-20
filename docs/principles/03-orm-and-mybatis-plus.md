@@ -89,7 +89,7 @@ sequenceDiagram
 > [!NOTE]
 > **抽象语法树（AST, Abstract Syntax Tree）重写的优势**：
 > 传统的粗暴做法是用字符串正则匹配去截取并拼接 SQL，但极易因为用户查询中包含 `ORDER BY`、复杂子查询或 `GROUP BY` 导致语法错误。
-> MyBatis-Plus 借助 `JSqlParser` 将整条 SQL 编译为内存中的节点树（如 `SelectBody`、`PlainSelect`、`OrderByElement`），从而可以像操作 DOM 树一样安全地删除、替换或挂载节点，保证生成的 SQL 在任何复杂场景下均具备 100% 语法正确性。
+> MyBatis-Plus 借助 `JSqlParser` 将整条 SQL 编译为内存中的节点树（如 `Select`、`PlainSelect`、`OrderByElement`），从而可以像操作 DOM 树一样安全地删除、替换或挂载节点，保证生成的 SQL 在任何复杂场景下均具备 100% 语法正确性。
 
 ---
 
@@ -140,15 +140,14 @@ ORM（对象关系映射）的核心价值绝不仅限于“把表映射成 Java
   ```
 - 实体类 [`ShopBrand`](file:///D:/JavaWeb/backend/src/main/java/com/shop/modules/catalog/entity/ShopBrand.java) 对应扩展：
   ```java
-  @TableField("origin")
   private String origin;
   ```
-- MyBatis-Plus 单表 CRUD 自动识别并纳入动态 SQL 字段构建，无论是后台品牌新增/修改，还是前台按产地筛选展示，均零样板代码即刻生效。
+- MyBatis-Plus 单表 CRUD 自动按列名同名映射并纳入动态 SQL 字段构建，无论是后台品牌新增/修改与按产地关键字检索，还是前台首页品牌墙与商品详情页的产地展示，均零样板代码即刻生效。
 
 ### 4.3 消除数据泥团（Data Clumps）：`DeliveryAddress` 值对象映射
 在 `ShopOrder` 中，收件人、联系手机、收货地址属于强关联的一组物理属性。我们将其封装为 [`DeliveryAddress`](file:///D:/JavaWeb/backend/src/main/java/com/shop/modules/commerce/dto/DeliveryAddress.java) 值对象：
-- 在订单主表实体内部，通过 Getter/Setter 协调拍平属性与结构化值对象的映射；
-- 提供非破坏性 Setter（防止 `null` 覆盖既有数据），对外暴露纯粹的充血值对象契约。
+- 在订单主表实体内部，通过 `getDeliveryAddress()` / `setDeliveryAddress()` 协调拍平数据库列与结构化值对象的双向同步；
+- `setDeliveryAddress(null)` 时保留底层物理列既有值不被清空，兼顾 MyBatis-Plus 反射映射兼容性与上层业务的值对象高内聚传递。
 
 ### 4.4 领域充血实体行为：`calculateSubtotal()` 计算逻辑内聚
 坚决摒弃初学者将业务实体仅视作 getter/setter 容器的“贫血模型（Anemic Domain Model）”反模式：

@@ -28,7 +28,7 @@
    - [4.3 充血实体计算行为：小计内聚消除特性依恋](#43-充血实体计算行为小计内聚消除特性依恋)
 5. [数据库初始化与种子数据注入机制](#5-数据库初始化与种子数据注入机制)
    - [5.1 本地开发环境手工/脚本初始化](#51-本地开发环境手工脚本初始化)
-   - [5.2 生产容器化自动化初始化 (`docker-entrypoint-initdb.d`)](#52-生产容器化自动化初始化-docker-entrypoint-initdbd)
+   - [5.2 容器化自动化初始化 (`docker-entrypoint-initdb.d`)](#52-容器化自动化初始化-docker-entrypoint-initdbd)
 
 ---
 
@@ -37,7 +37,7 @@
 本项目持久层遵循现代企业级与领域驱动设计（DDD）规范：
 
 - **主键规范**：全表统一采用 `BIGINT NOT NULL AUTO_INCREMENT` 作为物理自增主键，保障 B+ 树叶子节点顺序插入，避免聚簇索引页频繁分裂。
-- **软删除规范（Soft Deletion）**：用户、品牌、分类、商品等实体表均包含 `is_deleted TINYINT NOT NULL DEFAULT 0` 列，对接 MyBatis-Plus 全局 `@TableLogic` 机制，查询自动拼接 `WHERE is_deleted = 0`，删除自动降级为更新。
+- **软删除规范（Soft Deletion）**：用户（`sys_user`）、品牌（`shop_brand`）、分类（`shop_category`）、商品（`shop_product`）4 张基础主数据表均包含 `is_deleted TINYINT NOT NULL DEFAULT 0` 列，对接 MyBatis-Plus 全局 `@TableLogic` 机制，查询自动拼接 `WHERE is_deleted = 0`，删除自动降级为更新；而其余 3 张表**刻意不设软删除列**：`shop_cart_item` 属于高频增删暂存表且建有 `(user_id, product_id)` 唯一联合索引（必须物理 `DELETE` 避免移除后再次加购触发唯一键冲突），`shop_order` 与 `shop_order_item` 属于不可抹除的商业财务凭证（取消交易仅允许状态流转为 `CANCELLED`，严禁任何删除操作，且 `shop_order_item` 不设 `updated_at` 以宣示只读快照属性）。
 - **审计规范（Audit Columns）**：业务表统一预留 `created_at`（创建时间）与 `updated_at`（修改时间），结合 MySQL 原生 `DEFAULT CURRENT_TIMESTAMP` 和 `ON UPDATE CURRENT_TIMESTAMP` 以及 MyBatis-Plus 的 `FieldFill.INSERT` / `FieldFill.INSERT_UPDATE` 实现数据库与应用层双重自适应填充。
 - **金额精度规范**：所有商品标价、销售价、小计、订单总额均采用高精度 `DECIMAL(10, 2)` 存储，严禁使用浮点数 `FLOAT` 或 `DOUBLE`，Java 实体对应 `java.math.BigDecimal`。
 - **不可变快照隔离**：订单项（`shop_order_item`）在支付下单瞬间固化商品的标题、图片、单价快照，解耦商品目录后续修改对历史交易证据的影响。
@@ -100,7 +100,7 @@
 | `created_at` | `DATETIME` | 否 | `CURRENT_TIMESTAMP` | 无 | 品牌创建时间 |
 | `updated_at` | `DATETIME` | 否 | `CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP` | 无 | 品牌资料更新时间 |
 
-> **字段特别说明**：`origin VARCHAR(64)` 为本项目核心扩展字段，实体类对应 `private String origin;`，在前台商城橱窗卡片与后台品牌管理抽屉均有直接数据交互，并通过 Redis 分区键 `catalog:brand:all` 提供高性能缓存支撑。
+> **字段特别说明**：`origin VARCHAR(64)` 为本项目核心扩展字段，实体类对应 `private String origin;`，在前台首页品牌墙、商品详情页与后台品牌管理对话框（含关键字检索）均有直接数据交互，并通过 Redis 分区键（`catalog:brand:featured:*`、`catalog:brand:portal:all`、`catalog:brand:all`、`catalog:brand:list:*`）提供高性能缓存支撑。
 
 ---
 
@@ -151,7 +151,7 @@
 > **高并发防超卖核心机制**：库存扣减通过 `ShopProductMapper.decrementStock(productId, quantity)` 执行单条原子 SQL：
 > ```sql
 > UPDATE shop_product SET stock = stock - #{quantity} 
-> WHERE id = #{id} AND stock >= #{quantity} AND is_deleted = 0;
+> WHERE id = #{productId} AND stock >= #{quantity} AND is_deleted = 0;
 > ```
 > 借助 InnoDB 聚簇索引行级排他锁保证原子判定，彻底避免高并发秒杀场景下的超卖问题。
 
@@ -166,8 +166,8 @@
 | 列名 | 数据类型 | 可空 | 默认值 | 约束 / 索引 | 业务含义与说明 |
 |---|---|:---:|---|---|---|
 | `id` | `BIGINT` | 否 | `AUTO_INCREMENT` | `PRIMARY KEY` | 购物车条目唯一主键 |
-| `user_id` | `BIGINT` | 否 | 无 | `KEY idx_user_id` | 拥有该购物车的用户 ID（DDD 映射为 `customerId`） |
-| `product_id` | `BIGINT` | 否 | 无 | `UNIQUE KEY uk_user_product` (联合 1) | 加入购物车的商品 ID |
+| `user_id` | `BIGINT` | 否 | 无 | `UNIQUE KEY uk_user_product` (联合 1), `KEY idx_user_id` | 拥有该购物车的用户 ID（DDD 映射为 `customerId`） |
+| `product_id` | `BIGINT` | 否 | 无 | `UNIQUE KEY uk_user_product` (联合 2) | 加入购物车的商品 ID |
 | `quantity` | `INT` | 否 | `1` | 无 | 计划购买数量 |
 | `checked` | `TINYINT` | 否 | `1` | 无 | 结算选中标记：`1` 已勾选，`0` 未勾选 |
 | `created_at` | `DATETIME` | 否 | `CURRENT_TIMESTAMP` | 无 | 首次加入购物车时间 |
@@ -186,7 +186,7 @@
 | 列名 | 数据类型 | 可空 | 默认值 | 约束 / 索引 | 业务含义与说明 |
 |---|---|:---:|---|---|---|
 | `id` | `BIGINT` | 否 | `AUTO_INCREMENT` | `PRIMARY KEY` | 订单唯一自增主键 |
-| `order_no` | `VARCHAR(64)` | 否 | 无 | `UNIQUE KEY uk_order_no` | 全局唯一业务订单编号（雪花算法/时间序列生成） |
+| `order_no` | `VARCHAR(64)` | 否 | 无 | `UNIQUE KEY uk_order_no` | 全局唯一业务订单编号（毫秒时间序列 + 4 位随机码生成） |
 | `user_id` | `BIGINT` | 否 | 无 | `KEY idx_user_order` (复合 1) | 下单顾客 ID（DDD 映射为 `customerId`） |
 | `total_amount` | `DECIMAL(10,2)` | 否 | `0.00` | 无 | 订单结算实付总金额 |
 | `receiver_name` | `VARCHAR(64)` | 否 | 无 | 无 | 配送收货人姓名 |
@@ -289,8 +289,10 @@
   ```
 - **业务收益**：
   1. 概念完整：收货信息作为一个原子业务概念在订单结算、审核、流转中传递；
-  2. 防御性校验：`DeliveryAddress` 内置 `isValid()` 方法统一验证姓名、手机号、详细地址的非空与长度合法性；
+  2. 防御性校验：`DeliveryAddress` 内置的三字段均带 `@NotBlank` / `@Size` Bean Validation 约束，配合构造器与 Setter 的统一 `trim()` 净化，在控制器层完成收货信息的非空与长度合法性校验；
   3. 非破坏性保护：实体 Setter 内部处理映射，传入 `null` 时不破坏既有数据。
+
+> 注：`DeliveryAddress` 当前为**可变** DTO（提供 3 个 Setter 以配合 JSON 反序列化与实体映射），其值对象语义由"构造器统一净化 + `equals`/`hashCode` 按值比较 + 三字段高内聚传递"共同体现；若需严格不可变，可后续移除 Setter 并改用 `@JsonCreator` 反序列化。
 
 ### 4.3 充血实体计算行为：小计内聚消除特性依恋
 
@@ -337,9 +339,14 @@ mysql -u root -p < docs/sql/data.sql
 1. 打开 `docs/sql/schema.sql`，选中并“作为 SQL 运行”；
 2. 打开 `docs/sql/data.sql`，执行导入预设演示数据。
 
-### 5.2 生产容器化自动化初始化 (`docker-entrypoint-initdb.d`)
+### 5.2 容器化自动化初始化 (`docker-entrypoint-initdb.d`)
 
-在方案一生产部署（见 [`deploy/docker-compose.prod.yml`](file:///D:/JavaWeb/deploy/docker-compose.prod.yml)）中，持久层 `shop-mysql` 容器利用官方 MySQL 镜像的声明式初始化特性：
+生产编排 [`deploy/docker-compose.prod.yml`](file:///D:/JavaWeb/deploy/docker-compose.prod.yml) 与试用编排 [`deploy/trial/docker-compose.yml`](file:///D:/JavaWeb/deploy/trial/docker-compose.yml) 均利用官方 MySQL 镜像的声明式初始化特性，且在安全加固后**统一只挂载建表脚本 `schema.sql`，不再自动挂载 `data.sql`**：
+
+- **生产编排**：只读挂载仓库内的 `../docs/sql/schema.sql`；
+- **试用编排**：只读挂载部署包同级的 `./sql/schema.sql`（打包时从 `docs/sql/` 复制而来），**刻意不挂载 `data.sql`**，杜绝重装或初始化时将公开的默认管理员口令自动写入公网环境。
+
+> 容器化首次部署后数据库仅有 7 张空表结构，需按主 [README](file:///D:/JavaWeb/README.md) 的「管理员账号初始化」创建管理员账号；仅本地离线演示若确需导入演示商品与测试账号，才手动执行 `data.sql`。
 
 ```yaml
 services:
@@ -347,19 +354,18 @@ services:
     image: mysql:8.4
     container_name: shop-mysql
     restart: always
+    mem_limit: 1400m
     environment:
-      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:-Shop_Prod_Root_Secret_2026!}
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:-Shop_Trial_2026!}
       MYSQL_DATABASE: ${DB_NAME:-shop_db}
       TZ: Asia/Shanghai
     volumes:
-      - mysql_data:/var/lib/mysql
-      - ../docs/sql/schema.sql:/docker-entrypoint-initdb.d/01_schema.sql:ro
-      - ../docs/sql/data.sql:/docker-entrypoint-initdb.d/02_data.sql:ro
+      - ./data/mysql:/var/lib/mysql
+      - ./sql/schema.sql:/docker-entrypoint-initdb.d/01_schema.sql:ro
+      # 刻意不挂载 data.sql，避免默认口令随容器初始化自动落库
 ```
 
 **工作执行原理**：
-1. 当生产服务器首次执行 `docker compose -f deploy/docker-compose.prod.yml up -d` 时，挂载的 `mysql_data` 数据卷为空；
-2. 容器启动脚本 `entrypoint` 自动检测到空库，按字母序依次读取挂载在 `/docker-entrypoint-initdb.d/` 目录下的 SQL 文件：
-   - 首先执行 `01_schema.sql`（只读挂载 `docs/sql/schema.sql`），构建完整的 `shop_db` 7 张表体系与索引；
-   - 随后执行 `02_data.sql`（只读挂载 `docs/sql/data.sql`），注入演示账号与初始化全景商品目录；
-3. 一旦数据卷初始化完成，后续容器重启不再重复执行初始化，兼顾初次部署的零配置交付与持久化存储的绝对安全。
+1. 容器首次启动时，挂载的数据目录为空（生产为 `mysql_data` 卷，试用为 `./data/mysql` 目录）；
+2. 容器启动脚本 `entrypoint` 自动检测到空库，读取挂载在 `/docker-entrypoint-initdb.d/01_schema.sql` 下的 DDL 脚本，自动构建完整的 `shop_db` 7 张表体系与索引；
+3. 一旦数据目录初始化完成，后续容器重启不再重复执行初始化。试用环境如需清空重置库表，可执行 `docker compose down && rm -rf ./data/mysql && docker compose up -d`。

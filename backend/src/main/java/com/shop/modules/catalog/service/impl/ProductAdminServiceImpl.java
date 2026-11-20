@@ -2,6 +2,7 @@ package com.shop.modules.catalog.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.shop.common.cache.TransactionalCacheEvictor;
 import com.shop.common.exception.BusinessException;
 import com.shop.common.result.PageResult;
 import com.shop.common.result.ResultCode;
@@ -15,6 +16,7 @@ import com.shop.modules.catalog.mapper.ShopBrandMapper;
 import com.shop.modules.catalog.mapper.ShopCategoryMapper;
 import com.shop.modules.catalog.mapper.ShopProductMapper;
 import com.shop.modules.catalog.service.ProductAdminService;
+import com.shop.modules.catalog.service.util.CatalogLookupHelper;
 import com.shop.modules.catalog.service.util.ProductImageHelper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -122,24 +124,32 @@ public class ProductAdminServiceImpl implements ProductAdminService {
 
     @Override
     public PageResult<ProductAdminVO> listAdminProducts(AdminProductQuery query) {
+        AdminProductQuery safeQuery = query != null
+                ? query
+                : new AdminProductQuery(null, null, null, null, 1, 10);
         LambdaQueryWrapper<ShopProduct> wrapper = new LambdaQueryWrapper<>();
 
-        if (StringUtils.hasText(query.name())) {
-            wrapper.like(ShopProduct::getName, query.name().trim());
+        if (StringUtils.hasText(safeQuery.name())) {
+            wrapper.like(ShopProduct::getName, safeQuery.name().trim());
         }
-        if (query.brandId() != null) {
-            wrapper.eq(ShopProduct::getBrandId, query.brandId());
+        if (safeQuery.brandId() != null) {
+            wrapper.eq(ShopProduct::getBrandId, safeQuery.brandId());
         }
-        if (query.categoryId() != null) {
-            wrapper.eq(ShopProduct::getCategoryId, query.categoryId());
+        if (safeQuery.categoryId() != null) {
+            List<Long> targetCategoryIds = CatalogLookupHelper.collectSelfAndDescendantIds(categoryMapper, safeQuery.categoryId());
+            if (targetCategoryIds.size() == 1) {
+                wrapper.eq(ShopProduct::getCategoryId, targetCategoryIds.get(0));
+            } else {
+                wrapper.in(ShopProduct::getCategoryId, targetCategoryIds);
+            }
         }
-        if (query.status() != null) {
-            wrapper.eq(ShopProduct::getStatus, query.status());
+        if (safeQuery.status() != null) {
+            wrapper.eq(ShopProduct::getStatus, safeQuery.status());
         }
 
         wrapper.orderByDesc(ShopProduct::getId);
 
-        Page<ShopProduct> page = new Page<>(query.pageNumOrDefault(), query.pageSizeOrDefault());
+        Page<ShopProduct> page = new Page<>(safeQuery.pageNumOrDefault(), safeQuery.pageSizeOrDefault());
         Page<ShopProduct> productPage = productMapper.selectPage(page, wrapper);
 
         List<ProductAdminVO> vos = toAdminVOList(productPage.getRecords());
@@ -197,6 +207,10 @@ public class ProductAdminServiceImpl implements ProductAdminService {
     }
 
     private void evictProductCaches(Long productId) {
+        TransactionalCacheEvictor.evictNowAndAfterCommit(() -> doEvictProductCaches(productId));
+    }
+
+    private void doEvictProductCaches(Long productId) {
         try {
             redisTemplate.delete(ProductCatalogServiceImpl.HOME_SHOWCASE_CACHE_KEY);
             if (productId != null) {
@@ -215,11 +229,8 @@ public class ProductAdminServiceImpl implements ProductAdminService {
         Set<Long> brandIds = products.stream().map(ShopProduct::getBrandId).filter(b -> b != null && b > 0).collect(Collectors.toSet());
         Set<Long> catIds = products.stream().map(ShopProduct::getCategoryId).filter(c -> c != null && c > 0).collect(Collectors.toSet());
 
-        Map<Long, String> brandNames = brandIds.isEmpty() ? Collections.emptyMap() :
-                brandMapper.selectBatchIds(brandIds).stream().collect(Collectors.toMap(ShopBrand::getId, ShopBrand::getName, (a, b) -> a));
-
-        Map<Long, String> catNames = catIds.isEmpty() ? Collections.emptyMap() :
-                categoryMapper.selectBatchIds(catIds).stream().collect(Collectors.toMap(ShopCategory::getId, ShopCategory::getName, (a, b) -> a));
+        Map<Long, String> brandNames = CatalogLookupHelper.loadBrandNames(brandMapper, brandIds);
+        Map<Long, String> catNames = CatalogLookupHelper.loadCategoryNames(categoryMapper, catIds);
 
         return products.stream().map(p -> new ProductAdminVO(
                 p.getId(),

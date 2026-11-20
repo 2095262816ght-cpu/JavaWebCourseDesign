@@ -2,6 +2,7 @@ package com.shop.modules.catalog.mapper;
 
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.shop.modules.catalog.entity.ShopProduct;
+import org.apache.ibatis.annotations.Delete;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Update;
@@ -18,8 +19,13 @@ public interface ShopProductMapper extends BaseMapper<ShopProduct> {
     int decrementStock(@Param("productId") Long productId, @Param("quantity") Integer quantity);
 
     /**
-     * 恢复/归还库存
+     * 取消订单时回补/归还库存
+     * UPDATE shop_product SET stock = stock + #{quantity} WHERE id = #{productId} AND is_deleted = 0
+     * @return 实际影响行数
      */
     @Update("UPDATE shop_product SET stock = stock + #{quantity} WHERE id = #{productId} AND is_deleted = 0")
     int incrementStock(@Param("productId") Long productId, @Param("quantity") Integer quantity);
+
+    @Delete("DELETE FROM shop_product WHERE id = #{id}")
+    int physicalDeleteById(@Param("id") Long id);
 }

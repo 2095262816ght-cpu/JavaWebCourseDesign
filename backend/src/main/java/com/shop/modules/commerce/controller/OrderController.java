@@ -13,6 +13,7 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -47,14 +48,31 @@ public class OrderController {
         return Result.success("支付成功", null);
     }
 
+    @Operation(summary = "确认收货", description = "顾客确认已收到货物，订单状态由 SHIPPED 流转为 COMPLETED")
+    @PatchMapping("/{id}/confirm")
+    public Result<Void> confirmReceipt(@PathVariable Long id) {
+        Long customerId = StpUtil.getLoginIdAsLong();
+        orderCheckoutService.confirmReceipt(customerId, id);
+        return Result.success("确认收货成功", null);
+    }
+
+    @Operation(summary = "取消订单", description = "顾客取消未发货（UNPAID / PAID）订单，状态流转为 CANCELLED 并回补库存")
+    @PatchMapping("/{id}/cancel")
+    public Result<Void> cancelOrder(@PathVariable Long id) {
+        Long customerId = StpUtil.getLoginIdAsLong();
+        orderCheckoutService.cancelOrder(customerId, id);
+        return Result.success("订单已取消", null);
+    }
+
     @Operation(summary = "获取当前顾客的订单历史", description = "按创建时间倒序分页展示订单卡片及包含的商品快照")
     @GetMapping("/my")
     public Result<PageResult<OrderSummaryVO>> getMyOrders(
+            @RequestParam(required = false) String status,
             @RequestParam(defaultValue = "1") int pageNum,
             @RequestParam(defaultValue = "10") int pageSize
     ) {
         Long customerId = StpUtil.getLoginIdAsLong();
-        PageResult<OrderSummaryVO> pageResult = orderCheckoutService.listCustomerOrders(customerId, pageNum, pageSize);
+        PageResult<OrderSummaryVO> pageResult = orderCheckoutService.listCustomerOrders(customerId, status, pageNum, pageSize);
         return Result.success(pageResult);
     }
 

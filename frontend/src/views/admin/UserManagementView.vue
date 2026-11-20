@@ -120,7 +120,7 @@
           :page-sizes="[10, 20, 50]"
           :total="pagination.total"
           layout="total, sizes, prev, pager, next, jumper"
-          @size-change="loadData"
+          @size-change="handleSizeChange"
           @current-change="loadData"
         />
       </div>
@@ -165,6 +165,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { getAdminUsersApi, updateUserStatusApi } from '@/api/user'
 import type { UserProfile } from '@/api/auth'
 import { useUserStore } from '@/stores/user'
+import { formatDateTime } from '@/utils/format'
 
 const userStore = useUserStore()
 
@@ -194,11 +195,6 @@ function isCurrentAdmin(row: UserProfile) {
   return userStore.user?.id === row.id
 }
 
-function formatDateTime(val?: string) {
-  if (!val) return '-'
-  return val.replace('T', ' ').substring(0, 19)
-}
-
 async function loadData() {
   loading.value = true
   try {
@@ -216,6 +212,12 @@ async function loadData() {
   } finally {
     loading.value = false
   }
+}
+
+function handleSizeChange(val: number) {
+  pagination.size = val
+  pagination.current = 1
+  loadData()
 }
 
 function handleSearch() {
@@ -288,19 +290,19 @@ onMounted(() => {
 .page-title {
   font-size: 20px;
   font-weight: 700;
-  color: #111827;
+  color: var(--text);
   margin: 0;
 }
 
 .page-desc {
   font-size: 13px;
-  color: #6b7280;
+  color: var(--text-3);
   margin: 4px 0 0 0;
 }
 
 .filter-card {
-  border-radius: 12px;
-  border: 1px solid #e5e7eb;
+  border-radius: 16px;
+  border: 1px solid var(--glass-border);
 }
 
 .filter-form {
@@ -308,8 +310,8 @@ onMounted(() => {
 }
 
 .table-card {
-  border-radius: 12px;
-  border: 1px solid #e5e7eb;
+  border-radius: 16px;
+  border: 1px solid var(--glass-border);
 }
 
 .user-profile-cell {
@@ -325,13 +327,13 @@ onMounted(() => {
 
 .user-nickname {
   font-weight: 600;
-  color: #1f2937;
+  color: var(--text);
   font-size: 14px;
 }
 
 .user-username {
   font-size: 12px;
-  color: #9ca3af;
+  color: var(--text-4);
 }
 
 .status-cell {
@@ -343,7 +345,7 @@ onMounted(() => {
 
 .self-tag {
   font-size: 11px;
-  color: #9ca3af;
+  color: var(--text-4);
 }
 
 .pagination-wrapper {
@@ -370,7 +372,7 @@ onMounted(() => {
   margin: 0;
   font-size: 18px;
   font-weight: 700;
-  color: #111827;
+  color: var(--text);
 }
 
 .detail-desc {

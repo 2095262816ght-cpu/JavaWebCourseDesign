@@ -4,14 +4,21 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.shop.modules.auth.dto.LoginCommand;
 import com.shop.modules.catalog.dto.BrandCommand;
 import com.shop.modules.catalog.dto.CategoryCommand;
+import com.shop.modules.catalog.service.impl.CategoryServiceImpl;
+import com.shop.modules.catalog.service.impl.ProductCatalogServiceImpl;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.util.Set;
 
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.is;
@@ -24,6 +31,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 @SpringBootTest
 @AutoConfigureMockMvc
+@Transactional
 class CatalogControllerTest {
 
     @Autowired
@@ -32,7 +40,20 @@ class CatalogControllerTest {
     @Autowired
     private ObjectMapper objectMapper;
 
+    @Autowired
+    private StringRedisTemplate redisTemplate;
+
     private String adminToken;
+
+    @AfterEach
+    void cleanupCatalogRedisCache() {
+        Set<String> brandKeys = redisTemplate.keys("catalog:brand:*");
+        if (brandKeys != null && !brandKeys.isEmpty()) {
+            redisTemplate.delete(brandKeys);
+        }
+        redisTemplate.delete(CategoryServiceImpl.CATEGORY_TREE_CACHE_KEY);
+        redisTemplate.delete(ProductCatalogServiceImpl.HOME_SHOWCASE_CACHE_KEY);
+    }
 
     @BeforeEach
     void setupAdminToken() throws Exception {
@@ -60,6 +81,13 @@ class CatalogControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code", is(200)))
                 .andExpect(jsonPath("$.data").isArray());
+
+        // 3. 公开获取全量启用品牌
+        mockMvc.perform(get("/api/portal/brands"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code", is(200)))
+                .andExpect(jsonPath("$.data").isArray())
+                .andExpect(jsonPath("$.data[0].name").isNotEmpty());
     }
 
     @Test
@@ -130,5 +158,34 @@ class CatalogControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code", is(401)))
                 .andExpect(jsonPath("$.message", containsString("请先登录")));
+    }
+
+    @Test
+    @DisplayName("测试品牌与分类接口拒绝非法状态值及分页越界钳制")
+    void testInvalidStatusAndPaginationClamping() throws Exception {
+        BrandCommand invalidBrand = new BrandCommand(null, "InvalidStatusBrand", null, null, 1, 99);
+        mockMvc.perform(post("/api/admin/brands")
+                        .header("satoken", adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(invalidBrand)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code", is(400)));
+
+        CategoryCommand invalidCat = new CategoryCommand(null, 0L, "InvalidStatusCat", null, 1, 2);
+        mockMvc.perform(post("/api/admin/categories")
+                        .header("satoken", adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(invalidCat)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code", is(400)));
+
+        mockMvc.perform(get("/api/admin/brands")
+                        .header("satoken", adminToken)
+                        .param("page", "0")
+                        .param("size", "999"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code", is(200)))
+                .andExpect(jsonPath("$.data.current", is(1)))
+                .andExpect(jsonPath("$.data.size", is(100)));
     }
 }

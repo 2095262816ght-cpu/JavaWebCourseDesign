@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
 import { useCartStore } from '@/stores/cart'
+import { getCartApi, updateCartItemApi } from '@/api/cart'
 
 vi.mock('@/api/cart', () => ({
   getCartApi: vi.fn(),
@@ -112,5 +113,140 @@ describe('Pinia Cart Store & Reactive Computations', () => {
     expect(store.cartCount).toBe(1)
     expect(store.totalAmount).toBe(8999)
     expect(store.isAllChecked).toBe(true)
+  })
+
+  it('toggleCheckAll skips off-shelf or zero-stock items when selecting all, but allows unchecking them', async () => {
+    localStorage.setItem('token', 'mock-jwt-token')
+    vi.mocked(updateCartItemApi).mockResolvedValue(undefined)
+
+    const initialItems = [
+      {
+        id: 11,
+        productId: 101,
+        productName: '正常在售商品',
+        productImage: '',
+        price: 100,
+        quantity: 1,
+        subtotal: 100,
+        stock: 10,
+        checked: false,
+        productStatus: 1
+      },
+      {
+        id: 12,
+        productId: 102,
+        productName: '已下架商品',
+        productImage: '',
+        price: 200,
+        quantity: 1,
+        subtotal: 200,
+        stock: 5,
+        checked: false,
+        productStatus: 0
+      },
+      {
+        id: 13,
+        productId: 103,
+        productName: '已售罄商品',
+        productImage: '',
+        price: 300,
+        quantity: 1,
+        subtotal: 300,
+        stock: 0,
+        checked: true,
+        productStatus: 1
+      }
+    ]
+
+    vi.mocked(getCartApi).mockResolvedValue({
+      items: initialItems.map((it) => (it.id === 11 ? { ...it, checked: true } : { ...it })),
+      totalItems: 3,
+      checkedCount: 1,
+      totalAmount: 100
+    })
+
+    const store = useCartStore()
+    store.cartSummary = {
+      items: initialItems,
+      totalItems: 3,
+      checkedCount: 0,
+      totalAmount: 0
+    }
+
+    vi.mocked(updateCartItemApi).mockClear()
+    await store.toggleCheckAll(true)
+    expect(vi.mocked(updateCartItemApi)).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(updateCartItemApi)).toHaveBeenCalledWith(11, { checked: true })
+
+    vi.mocked(updateCartItemApi).mockClear()
+    await store.toggleCheckAll(false)
+    expect(vi.mocked(updateCartItemApi)).toHaveBeenCalledTimes(2)
+    expect(vi.mocked(updateCartItemApi)).toHaveBeenCalledWith(11, { checked: false })
+    expect(vi.mocked(updateCartItemApi)).toHaveBeenCalledWith(13, { checked: false })
+  })
+
+  it('toggleCheckAll excludes items whose quantity exceeds current stock when selecting all, while allowing unchecking them', async () => {
+    localStorage.setItem('token', 'mock-jwt-token')
+    vi.mocked(updateCartItemApi).mockResolvedValue(undefined)
+
+    const items = [
+      {
+        id: 21,
+        productId: 201,
+        productName: '库存充足商品',
+        productImage: '',
+        price: 100,
+        quantity: 2,
+        subtotal: 200,
+        stock: 5,
+        checked: true,
+        productStatus: 1
+      },
+      {
+        id: 22,
+        productId: 202,
+        productName: '超库存商品',
+        productImage: '',
+        price: 300,
+        quantity: 5,
+        subtotal: 1500,
+        stock: 2,
+        checked: false,
+        productStatus: 1
+      }
+    ]
+
+    vi.mocked(getCartApi).mockResolvedValue({
+      items: items.map((it) => ({ ...it, checked: true })),
+      totalItems: 2,
+      checkedCount: 2,
+      totalAmount: 1700
+    })
+
+    const store = useCartStore()
+    store.cartSummary = {
+      items,
+      totalItems: 2,
+      checkedCount: 2,
+      totalAmount: 200
+    }
+
+    // Only the valid item (id=21) is checkable and checked -> isAllChecked should be true
+    expect(store.isAllChecked).toBe(true)
+
+    store.cartSummary.items[0].checked = false
+    store.cartSummary.items[1].checked = true
+    expect(store.isAllChecked).toBe(false)
+
+    vi.mocked(updateCartItemApi).mockClear()
+    await store.toggleCheckAll(true)
+    expect(vi.mocked(updateCartItemApi)).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(updateCartItemApi)).toHaveBeenCalledWith(21, { checked: true })
+
+    vi.mocked(updateCartItemApi).mockClear()
+    await store.toggleCheckAll(false)
+    expect(vi.mocked(updateCartItemApi)).toHaveBeenCalledTimes(2)
+    expect(vi.mocked(updateCartItemApi)).toHaveBeenCalledWith(21, { checked: false })
+    expect(vi.mocked(updateCartItemApi)).toHaveBeenCalledWith(22, { checked: false })
   })
 })

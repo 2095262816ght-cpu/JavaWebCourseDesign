@@ -126,37 +126,53 @@ flowchart TD
 |                                useCartStore (前端深模块)                              |
 +---------------------------------------------------------------------------------------+
 |  【极简对外契约】:                                                                    |
-|    - items: Ref<CartItemVO[]>                                                         |
+|    - items: ComputedRef<CartItem[]>                                                   |
 |    - checkedCount: ComputedRef<number> (已勾选商品件数)                               |
 |    - totalAmount: ComputedRef<number>  (已勾选总金额)                                 |
-|    - refreshCart()                                                                    |
+|    - fetchCart()                                                                      |
 |    - addToCart(productId, quantity)                                                   |
 |    - updateQuantity(itemId, quantity)                                                 |
-|    - toggleChecked(itemId, checked)                                                   |
+|    - toggleCheck(itemId, checked)                                                     |
 +---------------------------------------------------------------------------------------+
 |  【深层隐藏实现】:                                                                    |
 |    - 封装 Axios API 异步网络请求与 JWT Header 携带                                    |
-|    - 异常错误统一 Toast 提示并自动回滚本地乐观状态                                    |
+|    - 异常统一提示；成功后重新拉取远端购物车，避免本地状态与后端漂移                    |
 |    - 自动触发全局导航栏购物车小红点角标实时联动刷新                                   |
 +---------------------------------------------------------------------------------------+
 ```
 
 ### 3.2 深度封装让组件极度轻盈
 
-由于 `useCartStore` 承担了数据同步与状态计算的深度，在具体的视图组件（如 `ProductDetailView.vue`、`HomeView.vue`）中，加购操作只需一行代码：
+由于 `useCartStore` 承担了数据同步与状态计算的深度，在商品详情视图组件（[`ProductDetailView.vue`](file:///D:/JavaWeb/frontend/src/views/portal/ProductDetailView.vue)）中，加购操作只需一行代码：
 
 ```ts
 const cartStore = useCartStore();
 
-// 一行代码完成加购，内部自动处理防抖、网络请求、红点刷新及异常提示
-await cartStore.addToCart(productId.value, buyCount.value);
+// 一行代码完成加购，内部自动处理网络请求、购物车刷新与异常提示
+await cartStore.addToCart(product.value.id, quantity.value);
 ```
 
 ### 3.3 品牌产地（`origin`）与数据模型全链路贯通
 
 在商品品牌管理与橱窗浏览中，前端配合后端扩展实现了“品牌产地”的全链路支持：
-- **管理控制台**（`BrandManageView.vue`）：表格动态渲染产地 Tag 标签；抽屉表单支持输入产地国家或地区，并支持按产地关键字即时筛选；
-- **前台商城橱窗**：商品详情与品牌展示卡片将产地作为核心背书属性呈现，提升电商交易真实感与视觉完整度。
+- **管理控制台**（[`BrandManagementView.vue`](file:///D:/JavaWeb/frontend/src/views/admin/BrandManagementView.vue)）：表格动态渲染产地 Tag 标签；新建/编辑对话框表单支持输入产地国家或地区，并支持按品牌名称、产地或描述关键字检索；
+- **前台商城橱窗**：首页甄选品牌墙与商品详情页将产地作为核心背书属性呈现，提升电商交易真实感与视觉完整度。
+
+### 3.4 管理后台运营看板（`DashboardView.vue`）：容错聚合与零依赖纯 CSS 图表
+
+在 [`DashboardView.vue`](file:///D:/JavaWeb/frontend/src/views/admin/DashboardView.vue) 中，我们遵循“克制依赖膨胀”的工程原则，**未引入体积庞大的 ECharts 图表库，也未在后端增加冗余的一次性统计接口**，而是通过现代前端响应式能力构建运营大盘：
+- **`Promise.allSettled` 局部降级容错**：页面挂载时并发拉取用户总数、全量订单分页与商品分页数据。采用 `Promise.allSettled` 替代“一损俱损”的 `Promise.all`，即使某单一接口偶发超时，其余 KPI 卡片照常渲染，故障卡片优雅降级显示 `—` 并支持一键手动刷新；
+- **严谨的财务统计口径与纯 CSS 动态图表**：利用 Vue `computed` 仅统计有效支付态订单（`PAID` / `SHIPPED` / `COMPLETED`，自动剔除 `UNPAID` 与 `CANCELLED`），计算今日销售额、较昨日环比涨跌幅、近七日成交额柱状图高度比例以及 5 种订单状态占比条，通过原生 CSS Flex 与过渡动画轻量渲染，并自动筛选在售且 `stock <= 10` 的商品生成低库存预警榜。
+
+### 3.5 统一网络网关（`request.ts`）：401 鉴权精准分流与跨模块联动
+
+全局 Axios 拦截器 [`request.ts`](file:///D:/JavaWeb/frontend/src/api/request.ts) 作为前端通信中枢，除了自动注入 `satoken` 请求头、统一按 `res.code === 200` 解包 `Result<T>` 外，专门处理了认证边界：
+- **登录失败 401 vs. 会话过期 401 分流**：当 `/api/auth/login` 返回业务码 `401` 时，代表用户输错账号或密码，拦截器直接透传后端错误信息（`用户名或密码错误`）；而当**非登录业务接口**返回 `401`（Token 过期或账号被管理员封禁踢下线）时，拦截器立即清除 `localStorage` 中的 `token`、`user` 与 `shop_cart_cache`，并派发全局自定义事件 `window.dispatchEvent(new CustomEvent('auth:expired'))`，通知 `useUserStore` 与 `useCartStore` 同步重置内存状态，彻底杜绝切换账号时的购物车缓存串号。
+
+### 3.6 视觉设计语言、高性能视口动效与前端上传安全
+
+- **双端统一玻璃拟态与无障碍动效**：前后台共享 [`glass.css`](file:///D:/JavaWeb/frontend/src/styles/glass.css) 视觉规范与可复用组件 [`ProductCard.vue`](file:///D:/JavaWeb/frontend/src/components/ProductCard.vue)；自定义指令 [`v-reveal`](file:///D:/JavaWeb/frontend/src/directives/reveal.ts) 全局复用**单例 `IntersectionObserver`** 实现卡片滑入视口上浮淡入（替代损耗主线程性能的 `scroll` 事件监听，入场后立即 `unobserve` 释放观察），并自动检测系统 `prefers-reduced-motion: reduce` 无障碍偏好。
+- **主/副图分离兼容与 `.svg` 脚本注入拦截**：商品封面 `mainImage` 单张必填，画廊 `subImages` 多张可选（详情页同时兼容 JSON 数组与逗号分隔格式，空副图自动以主图兜底）；图片上传前置校验 [`beforeImageUpload`](file:///D:/JavaWeb/frontend/src/utils/image.ts) 限定 `< 5MB` 位图白名单，**显式拦截禁止上传 `.svg` 矢量文件**，从源头阻断通过内嵌 `<script>` 的恶意 SVG 发起存储型 XSS 攻击。
 
 ---
 
@@ -173,17 +189,18 @@ await cartStore.addToCart(productId.value, buyCount.value);
 | **DOM 仿真引擎** | `jsdom` 功能完整但体积极其沉重，执行速度较慢 | **`happy-dom`** 轻量精简，内存占用极低，DOM 节点解析速度比 jsdom 快 2~4 倍 |
 | **TypeScript 支持** | 需配置繁重的类型映射与 transform | **开箱即用原生 TypeScript**，类型推导与生产构建完全一致 |
 
-### 4.2 三大核心自动化测试套件剖析
+### 4.2 四大核心自动化测试套件剖析
 
 ```
 frontend/test/
-├── router.spec.ts    # 路由守卫与角色越权拦截测试
-├── request.spec.ts   # Axios 网络拦截器与 JWT 携带测试
-└── cart.spec.ts      # Pinia 购物车深模块响应式状态流转测试
+├── router.spec.ts          # 路由守卫与角色越权拦截测试
+├── request.spec.ts         # Axios 网络拦截器与 JWT 携带测试
+├── cart.spec.ts            # Pinia 购物车深模块响应式状态流转测试
+└── user-cart-sync.spec.ts  # 登录态清理与购物车缓存联动测试
 ```
 
 #### 1. 路由守卫与鉴权越权测试（`router.spec.ts`）
-- 模拟未登录顾客访问受保护路由（如 `/orders`），断言全局路由守卫自动重定向至 `/login?redirect=...`；
+- 模拟未登录顾客访问受保护路由（如 `/cart`、`/admin`），断言全局路由守卫自动重定向至 `/login?redirect=...`；
 - 模拟普通顾客身份（`ROLE_CUSTOMER`）直接在地址栏输入访问 `/admin`，断言路由守卫精准捕获越权并拦截；
 - 模拟管理员（`ROLE_ADMIN`）登录后访问 `/admin`，断言正常放行渲染。
 
@@ -192,12 +209,17 @@ frontend/test/
 - **401 响应熔断**：模拟后端返回 401 认证失效状态码，断言拦截器自动清除本地持久化凭证（`localStorage.removeItem('token')` 与 `localStorage.removeItem('user')`），杜绝脏状态蔓延。
 
 #### 3. Pinia 购物车响应式状态测试（`cart.spec.ts`）
-- 断言购物车勾选计算属性（`checkedCount`）与总计金额（`totalAmount`）在勾选状态变动时即时触发依赖响应式重算；
-- 断言网络异常时自动触发本地乐观状态回滚，确保前端界面与真实后端状态严格一致。
+- 断言购物车 `cartCount`、`checkedCount`、`totalAmount` 与 `isAllChecked` 在数据变动时即时触发依赖响应式重算；
+- 断言本地缓存 `shop_cart_cache` 能正确持久化并在初始化时恢复；
+- 断言 `toggleCheckAll` 全选时跳过已下架、零库存及数量超库存的商品，但仍允许对这些商品取消勾选。
+
+#### 4. 登录态与购物车缓存联动测试（`user-cart-sync.spec.ts`）
+- 断言 `clearAuth()` 会同时清除 `token`、`user`、`shop_cart_cache` 并重置当前购物车 store；
+- 断言全量品牌接口请求 `/api/portal/brands` 且不携带分页参数。
 
 ### 4.3 运行前端测试命令
 ```bash
 cd frontend
 npm test
 ```
-终端瞬间输出绿色全过结果（15 个测试用例秒级通过），充分展现了高标准的现代前端工程素养。
+终端瞬间输出绿色全过结果（4 个测试文件、19 个测试用例秒级通过），充分展现了高标准的现代前端工程素养。

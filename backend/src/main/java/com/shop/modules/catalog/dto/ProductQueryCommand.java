@@ -35,6 +35,9 @@ public record ProductQueryCommand(
     }
 
     public int pageSizeOrDefault() {
-        return (pageSize == null || pageSize < 1 || pageSize > 100) ? 12 : pageSize;
+        if (pageSize == null || pageSize < 1) {
+            return 12;
+        }
+        return Math.min(pageSize, 100);
     }
 }

@@ -20,7 +20,7 @@ import org.springframework.util.StringUtils;
 @Service
 public class AuthServiceImpl implements AuthService {
 
-    private static final String DEFAULT_CUSTOMER_AVATAR = "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=200&h=200&fit=crop";
+    private static final String DEFAULT_CUSTOMER_AVATAR = "/uploads/avatar-default.jpg";
 
     private final SysUserMapper sysUserMapper;
 
@@ -31,12 +31,17 @@ public class AuthServiceImpl implements AuthService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public UserProfileVO register(RegisterCommand cmd) {
+        String username = cmd.username() != null ? cmd.username().trim() : "";
+        if (!StringUtils.hasText(username)) {
+            throw new BusinessException(ResultCode.BAD_REQUEST.getCode(), "用户名不能为空");
+        }
+
         // 1. 唯一性校验：确保用户名未被占用
         Long existingCount = sysUserMapper.selectCount(
-                new LambdaQueryWrapper<SysUser>().eq(SysUser::getUsername, cmd.username())
+                new LambdaQueryWrapper<SysUser>().eq(SysUser::getUsername, username)
         );
         if (existingCount != null && existingCount > 0) {
-            throw new BusinessException(ResultCode.BAD_REQUEST.getCode(), "用户名 [" + cmd.username() + "] 已被注册，请更换用户名");
+            throw new BusinessException(ResultCode.BAD_REQUEST.getCode(), "用户名 [" + username + "] 已被注册，请更换用户名");
         }
 
         // 2. 密码安全加盐散列（BCrypt 算法）
@@ -44,9 +49,9 @@ public class AuthServiceImpl implements AuthService {
 
         // 3. 构建用户实体并持久化
         SysUser user = new SysUser();
-        user.setUsername(cmd.username().trim());
+        user.setUsername(username);
         user.setPassword(saltHashedPassword);
-        user.setNickname(StringUtils.hasText(cmd.nickname()) ? cmd.nickname().trim() : cmd.username().trim());
+        user.setNickname(StringUtils.hasText(cmd.nickname()) ? cmd.nickname().trim() : username);
         user.setAvatar(StringUtils.hasText(cmd.avatar()) ? cmd.avatar().trim() : DEFAULT_CUSTOMER_AVATAR);
         user.setRole("ROLE_CUSTOMER");
         user.setStatus(1); // 默认启用
@@ -57,9 +62,10 @@ public class AuthServiceImpl implements AuthService {
 
     @Override
     public AuthTokenVO login(LoginCommand cmd) {
+        String username = cmd.username() != null ? cmd.username().trim() : "";
         // 1. 检索用户记录
         SysUser user = sysUserMapper.selectOne(
-                new LambdaQueryWrapper<SysUser>().eq(SysUser::getUsername, cmd.username())
+                new LambdaQueryWrapper<SysUser>().eq(SysUser::getUsername, username)
         );
 
         // 2. 验证用户存在及密码匹配性（防定时攻击与明文泄露）
@@ -68,7 +74,7 @@ public class AuthServiceImpl implements AuthService {
         }
 
         // 3. 状态检查（是否被管理员封禁）
-        if (user.getStatus() == null || user.getStatus() != 1) {
+        if (!user.isActive()) {
             throw new BusinessException(ResultCode.FORBIDDEN.getCode(), "该账号已被禁用，请联系平台管理员");
         }
 
@@ -93,7 +99,7 @@ public class AuthServiceImpl implements AuthService {
             throw new BusinessException(ResultCode.UNAUTHORIZED.getCode(), "用户资料不存在或登录已过期");
         }
 
-        if (user.getStatus() == null || user.getStatus() != 1) {
+        if (!user.isActive()) {
             StpUtil.logout();
             throw new BusinessException(ResultCode.FORBIDDEN.getCode(), "账号已被禁用，已被强制下线");
         }
@@ -111,16 +117,24 @@ public class AuthServiceImpl implements AuthService {
         if (user == null) {
             throw new BusinessException(ResultCode.UNAUTHORIZED.getCode(), "用户不存在");
         }
+        if (!user.isActive()) {
+            StpUtil.logout();
+            throw new BusinessException(ResultCode.FORBIDDEN.getCode(), "账号已被禁用，无法修改个人资料");
+        }
 
         // 密码修改逻辑（若传递了新密码）
         if (StringUtils.hasText(cmd.newPassword())) {
+            String trimmedNewPassword = cmd.newPassword().trim();
+            if (trimmedNewPassword.length() < 6 || trimmedNewPassword.length() > 32) {
+                throw new BusinessException(ResultCode.BAD_REQUEST.getCode(), "新密码长度须在6至32位之间");
+            }
             if (!StringUtils.hasText(cmd.oldPassword())) {
                 throw new BusinessException(ResultCode.BAD_REQUEST.getCode(), "修改密码必须输入原密码");
             }
             if (!BCrypt.checkpw(cmd.oldPassword(), user.getPassword())) {
                 throw new BusinessException(ResultCode.BAD_REQUEST.getCode(), "原密码验证不通过");
             }
-            user.setPassword(BCrypt.hashpw(cmd.newPassword(), BCrypt.gensalt()));
+            user.setPassword(BCrypt.hashpw(trimmedNewPassword, BCrypt.gensalt()));
         }
 
         if (StringUtils.hasText(cmd.nickname())) {

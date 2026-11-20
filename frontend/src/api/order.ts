@@ -76,17 +76,28 @@ export function payOrderApi(orderNo: string): Promise<void> {
 }
 
 /**
- * 分页查询当前顾客订单历史
+ * 分页查询当前顾客订单历史（支持按订单状态筛选）
  */
-export function getMyOrdersApi(params?: { pageNum?: number; pageSize?: number }): Promise<PageResult<OrderSummary>> {
+export function getMyOrdersApi(params?: {
+  pageNum?: number
+  pageSize?: number
+  status?: string
+}): Promise<PageResult<OrderSummary>> {
   return get<PageResult<OrderSummary>>('/api/orders/my', params)
 }
 
 /**
- * 查询指定订单详情与快照行项
+ * 查询指定订单详情与快照行项（顾客个人）
  */
 export function getOrderDetailApi(id: number): Promise<OrderDetail> {
   return get<OrderDetail>(`/api/orders/${id}`)
+}
+
+/**
+ * 管理员查询全平台任意订单详情与快照行项
+ */
+export function getAdminOrderDetailApi(id: number): Promise<OrderDetail> {
+  return get<OrderDetail>(`/api/admin/orders/${id}`)
 }
 
 /**
@@ -94,6 +105,27 @@ export function getOrderDetailApi(id: number): Promise<OrderDetail> {
  */
 export function getAdminOrdersApi(params?: AdminOrderQuery): Promise<PageResult<OrderSummary>> {
   return get<PageResult<OrderSummary>>('/api/admin/orders', params)
+}
+
+/**
+ * 顾客确认收货（SHIPPED -> COMPLETED）
+ */
+export function confirmReceiptApi(id: number): Promise<void> {
+  return patch<void>(`/api/orders/${id}/confirm`)
+}
+
+/**
+ * 顾客取消未发货订单（UNPAID / PAID -> CANCELLED，并回补库存）
+ */
+export function cancelOrderApi(id: number): Promise<void> {
+  return patch<void>(`/api/orders/${id}/cancel`)
+}
+
+/**
+ * 管理员取消未发货订单（UNPAID / PAID -> CANCELLED，并回补库存）
+ */
+export function cancelAdminOrderApi(id: number): Promise<void> {
+  return patch<void>(`/api/admin/orders/${id}/cancel`)
 }
 
 /**

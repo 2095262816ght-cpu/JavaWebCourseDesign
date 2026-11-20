@@ -19,7 +19,9 @@ spring:
     redis:
       host: localhost
       port: 6379
-      timeout: 3000ms
+      # 缓存不可用时快速失败并降级直查数据库，避免请求被悬挂拖到前端超时
+      timeout: 300ms
+      connect-timeout: 200ms
       lettuce:
         pool:
           max-active: 16

@@ -27,7 +27,9 @@ public class UserServiceImpl implements UserService {
 
     @Override
     public PageResult<UserProfileVO> pageUsers(int page, int size, String keyword, String role, Integer status) {
-        Page<SysUser> pageParam = new Page<>(page, size);
+        int safePage = Math.max(page, 1);
+        int safeSize = (size < 1) ? 10 : Math.min(size, 100);
+        Page<SysUser> pageParam = new Page<>(safePage, safeSize);
         LambdaQueryWrapper<SysUser> queryWrapper = new LambdaQueryWrapper<>();
 
         if (StringUtils.hasText(keyword)) {

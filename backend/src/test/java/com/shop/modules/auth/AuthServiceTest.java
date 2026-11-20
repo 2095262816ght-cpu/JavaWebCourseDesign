@@ -7,6 +7,7 @@ import com.shop.common.result.PageResult;
 import com.shop.modules.auth.dto.AuthTokenVO;
 import com.shop.modules.auth.dto.LoginCommand;
 import com.shop.modules.auth.dto.RegisterCommand;
+import com.shop.modules.auth.dto.UpdateProfileCommand;
 import com.shop.modules.auth.dto.UserProfileVO;
 import com.shop.modules.auth.service.AuthService;
 import com.shop.modules.system.entity.SysUser;
@@ -18,10 +19,12 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.UUID;
 
 @SpringBootTest
+@Transactional
 class AuthServiceTest {
 
     @Autowired
@@ -76,9 +79,9 @@ class AuthServiceTest {
         RegisterCommand cmd = new RegisterCommand(duplicateUser, "password123", "重复用户1", null);
         authService.register(cmd);
 
-        // 第二次注册同名应抛出 BusinessException
+        // 第二次注册同名（含首尾空格）也应抛出 BusinessException，而非数据库唯一约束 500
         Assertions.assertThrows(BusinessException.class, () -> {
-            authService.register(new RegisterCommand(duplicateUser, "anotherpass", "重复用户2", null));
+            authService.register(new RegisterCommand("  " + duplicateUser + "  ", "anotherpass", "重复用户2", null));
         });
     }
 
@@ -132,6 +135,27 @@ class AuthServiceTest {
         customerVo = userService.getUserById(2L);
         Assertions.assertEquals(1, customerVo.status());
 
+        authService.logout();
+    }
+
+    @Test
+    @DisplayName("测试仅修改昵称时传递空字符串新密码不触发异常")
+    void testUpdateProfileWithEmptyNewPassword() {
+        authService.login(new LoginCommand("customer", "123456"));
+        UserProfileVO updated = authService.updateCurrentUserProfile(
+                new UpdateProfileCommand("测试昵称更新", null, "", "")
+        );
+        Assertions.assertEquals("测试昵称更新", updated.nickname());
+        authService.logout();
+    }
+
+    @Test
+    @DisplayName("测试登录时用户名首尾空格自动裁剪")
+    void testLoginTrimmedUsername() {
+        AuthTokenVO tokenVO = authService.login(new LoginCommand("  admin  ", "admin123"));
+        Assertions.assertNotNull(tokenVO);
+        Assertions.assertNotNull(tokenVO.tokenValue());
+        Assertions.assertEquals("admin", tokenVO.user().username());
         authService.logout();
     }
 }

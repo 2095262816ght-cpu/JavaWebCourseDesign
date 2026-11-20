@@ -29,10 +29,10 @@ public class AdminCategoryController {
         this.categoryService = categoryService;
     }
 
-    @Operation(summary = "查询全部分类树", description = "管理员后台树形表格展示分类结构")
+    @Operation(summary = "查询全部分类树", description = "管理员后台树形表格展示分类结构（包含已禁用分类）")
     @GetMapping({"", "/tree"})
     public Result<List<CategoryNodeVO>> getCategoryTree() {
-        List<CategoryNodeVO> tree = categoryService.getCategoryTree();
+        List<CategoryNodeVO> tree = categoryService.getAdminCategoryTree();
         return Result.success(tree);
     }
 

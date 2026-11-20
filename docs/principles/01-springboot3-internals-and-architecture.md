@@ -163,20 +163,28 @@ public Result checkout(@RequestBody CheckoutDTO dto) {
 
 #### 本项目深模块实践：`OrderCheckoutService`
 
-在本项目中，`OrderCheckoutService` 接口仅定义了极简的方法契约（严格遵循 DDD 统一语言规范，以 `customerId` 消除与通用用户概念的二义性）：
+在本项目中，`OrderCheckoutService` 只暴露订单生命周期所需的契约方法（参数统一使用 `customerId`，严格遵循 DDD 统一语言规范，消除与通用用户概念的二义性）：
 ```java
 public interface OrderCheckoutService {
     OrderCheckoutResult checkout(Long customerId, CheckoutCommand cmd);
+    void confirmReceipt(Long customerId, Long orderId);
+    void cancelOrder(Long customerId, Long orderId);
+    void cancelOrderByAdmin(Long orderId);
     void pay(Long customerId, String orderNo);
-    PageResult<OrderSummaryVO> listCustomerOrders(Long customerId, int pageNum, int pageSize);
+    default PageResult<OrderSummaryVO> listCustomerOrders(Long customerId, int pageNum, int pageSize) {
+        return listCustomerOrders(customerId, null, pageNum, pageSize);
+    }
+    PageResult<OrderSummaryVO> listCustomerOrders(Long customerId, String status, int pageNum, int pageSize);
     OrderDetailVO getOrderDetail(Long customerId, Long orderId);
+    OrderDetailVO getAdminOrderDetail(Long orderId);
     void markShipped(Long orderId);
+    PageResult<OrderSummaryVO> listAdminOrders(AdminOrderQuery query);
 }
 ```
 
 在单一的 `checkout()` 调用背后，深模块对调用方完全封装并原子处理了 **6 重核心复杂性**：
 1. **自动过滤筛选**：根据 `customerId` 提取购物车内用户勾选的商品项；
-2. **批处理高性能检索引擎**：委托 `ProductBatchLookupHelper` 一次性批量加载全部关联商品并做一致性校验，消除循环单条查询（N+1 查询）；
+2. **批处理高性能加载与业务校验**：委托 `ProductBatchLookupHelper` 一次性批量加载全部关联商品并转为 `Map`（消除循环 N+1 查询），随后统一校验上架状态与库存；
 3. **原子条件防超卖扣减**：单条带状态条件的 SQL 扣减库存，拦截零库存并发穿透；
 4. **不可变快照生成**：订单项（`shop_order_item`）直接冻结当时的商品名、价格、图片，隔离商家后续调价风险；
 5. **事务强一致性与缓存精准淘汰**：`@Transactional` 确保主表、明细表、库存扣减、购物车清理处于同一原子事务内；扣减成功即刻淘汰商品详情与首页橱窗缓存，并通过 `TransactionSynchronization.afterCommit` 钩子在事务提交后二次淘汰；
@@ -196,10 +204,10 @@ public interface OrderCheckoutService {
 
 ### 4.1 数据泥团（Data Clumps）重构：引入 `DeliveryAddress` 值对象
 - **坏味道**：在 `ShopOrder`、`CheckoutCommand`、`OrderSummaryVO`、`OrderDetailVO` 中，`receiverName`、`receiverPhone`、`receiverAddress` 三个字段总是形影不离地成团出现。
-- **重构方案**：将三者封装为不可变的值对象（Value Object）—— [`DeliveryAddress`](file:///D:/JavaWeb/backend/src/main/java/com/shop/modules/commerce/dto/DeliveryAddress.java)。
+- **重构方案**：将三者封装为高内聚的收货信息值对象（Value Object）—— [`DeliveryAddress`](file:///D:/JavaWeb/backend/src/main/java/com/shop/modules/commerce/dto/DeliveryAddress.java)（为兼容 JSON 反序列化与实体映射保留 Setter，值语义由构造器统一 `trim()` 净化与 `equals`/`hashCode` 按值比较保证）。
 - **收益**：
   1. 概念更完整：收货信息作为一个业务原子概念流转；
-  2. 防御性空指针安全：内置非破坏性 setter，当传入 `null` 时不破坏既有数据；提供 `isValid()` 统一校验业务完整性。
+  2. 防御性校验与非破坏性映射：外层实体与 DTO 的 `setDeliveryAddress(...)` 均对 `null` 入参做保护避免破坏既有字段，同时结算入参 `CheckoutCommand` 与 `DeliveryAddress` 均声明 `@NotBlank` / `@Size` Bean Validation 约束并自动 `trim()` 净化。
 
 ### 4.2 特性依恋（Feature Envy）重构：行为回归充血实体
 - **坏味道**：初学者常在 Service 层循环遍历并手动计算 `item.getUnitPrice().multiply(BigDecimal.valueOf(item.getQuantity()))`，业务逻辑过分依赖外部实体的内部数据。
@@ -209,6 +217,6 @@ public interface OrderCheckoutService {
 - **收益**：Service 层只负责流程编排，实体类拥有核心计算能力，摆脱贫血模型（Anemic Model）。
 
 ### 4.3 重复逻辑抽离（Duplicated Code）：`ProductBatchLookupHelper`
-- **坏味道**：购物车核算与下单结算均需要：从 CartItem 列表提取 ProductId 集合、批量查询商品列表、将其转化为 `Map<Long, ShopProduct>`、校验商品是否存在且上架。
-- **重构方案**：抽取独立的深模块助手类 [`ProductBatchLookupHelper`](file:///D:/JavaWeb/backend/src/main/java/com/shop/modules/commerce/service/ProductBatchLookupHelper.java)。
-- **收益**：购物车服务与订单服务共享同一套高性能批处理逻辑，彻底消除重复代码与潜在的空指针漏判。
+- **坏味道**：购物车核算与下单结算均需要根据商品 ID 集合去重判空、调用 `selectBatchIds` 批量查询商品并转换为 `Map<Long, ShopProduct>` 索引结构。
+- **重构方案**：抽取独立的批处理查询助手类 [`ProductBatchLookupHelper`](file:///D:/JavaWeb/backend/src/main/java/com/shop/modules/commerce/service/ProductBatchLookupHelper.java)（`getProductMapByIds`）。
+- **收益**：购物车服务与订单服务共享同一套安全的批量字典加载逻辑，彻底消除 N+1 循环单查与空集合查询隐患。

@@ -56,7 +56,7 @@ class OrderConcurrencyTest {
     void tearDown() {
         // 清理并发测试产生的临时数据
         if (testProductId != null) {
-            productMapper.deleteById(testProductId);
+            productMapper.physicalDeleteById(testProductId);
         }
         for (Long uid : testUserIds) {
             LambdaQueryWrapper<ShopCartItem> cartWrapper = new LambdaQueryWrapper<>();

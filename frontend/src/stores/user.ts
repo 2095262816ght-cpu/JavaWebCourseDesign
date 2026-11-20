@@ -36,7 +36,7 @@ export const useUserStore = defineStore('user', () => {
   const isAdmin = computed(() => user.value?.role === 'ROLE_ADMIN')
   const displayName = computed(() => user.value?.nickname || user.value?.username || '用户')
   const userAvatar = computed(
-    () => user.value?.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=200&h=200&fit=crop'
+    () => user.value?.avatar || '/uploads/avatar-default.jpg'
   )
 
   /**
@@ -109,6 +109,15 @@ export const useUserStore = defineStore('user', () => {
     user.value = null
     localStorage.removeItem('token')
     localStorage.removeItem('user')
+    localStorage.removeItem('shop_cart_cache')
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('cart:reset'))
+    }
+  }
+
+  // 与请求层联动：401 时清空内存中的登录态，避免守卫继续放行失效会话
+  if (typeof window !== 'undefined') {
+    window.addEventListener('auth:expired', clearAuth)
   }
 
   return {

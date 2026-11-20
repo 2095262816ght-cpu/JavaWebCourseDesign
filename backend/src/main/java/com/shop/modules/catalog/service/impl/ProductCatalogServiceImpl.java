@@ -22,6 +22,7 @@ import com.shop.modules.catalog.mapper.ShopProductMapper;
 import com.shop.modules.catalog.service.BrandService;
 import com.shop.modules.catalog.service.CategoryService;
 import com.shop.modules.catalog.service.ProductCatalogService;
+import com.shop.modules.catalog.service.util.CatalogLookupHelper;
 import com.shop.modules.catalog.service.util.ProductImageHelper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -146,7 +147,7 @@ public class ProductCatalogServiceImpl implements ProductCatalogService {
 
         // 分类过滤 (支持父级分类查询：自动包含该父分类及其所有子分类商品)
         if (cmd.categoryId() != null) {
-            List<Long> targetCategoryIds = resolveCategoryHierarchy(cmd.categoryId());
+            List<Long> targetCategoryIds = CatalogLookupHelper.collectSelfAndDescendantIds(categoryMapper, cmd.categoryId());
             if (targetCategoryIds.size() == 1) {
                 wrapper.eq(ShopProduct::getCategoryId, targetCategoryIds.get(0));
             } else {
@@ -238,21 +239,6 @@ public class ProductCatalogServiceImpl implements ProductCatalogService {
         return detail;
     }
 
-    private List<Long> resolveCategoryHierarchy(Long rootCategoryId) {
-        List<Long> ids = new ArrayList<>();
-        ids.add(rootCategoryId);
-
-        LambdaQueryWrapper<ShopCategory> childWrapper = new LambdaQueryWrapper<ShopCategory>()
-                .eq(ShopCategory::getParentId, rootCategoryId);
-        List<ShopCategory> children = categoryMapper.selectList(childWrapper);
-        if (children != null && !children.isEmpty()) {
-            for (ShopCategory child : children) {
-                ids.add(child.getId());
-            }
-        }
-        return ids;
-    }
-
     private List<CarouselSlideVO> buildCarousels(List<ProductCardVO> products) {
         List<CarouselSlideVO> slides = new ArrayList<>();
         if (products != null && !products.isEmpty()) {
@@ -274,7 +260,7 @@ public class ProductCatalogServiceImpl implements ProductCatalogService {
                     1L,
                     "旗舰新品 尊享盛宴",
                     "严选全球尖货，品质生活触手可及",
-                    "https://images.unsplash.com/photo-1695048133142-1a20484d2569?w=1600&h=600&fit=crop",
+                    "/uploads/banner-home.jpg",
                     "/products",
                     null
             ));
@@ -290,11 +276,8 @@ public class ProductCatalogServiceImpl implements ProductCatalogService {
         Set<Long> brandIds = products.stream().map(ShopProduct::getBrandId).filter(b -> b != null && b > 0).collect(Collectors.toSet());
         Set<Long> catIds = products.stream().map(ShopProduct::getCategoryId).filter(c -> c != null && c > 0).collect(Collectors.toSet());
 
-        Map<Long, String> brandNames = brandIds.isEmpty() ? Collections.emptyMap() :
-                brandMapper.selectBatchIds(brandIds).stream().collect(Collectors.toMap(ShopBrand::getId, ShopBrand::getName, (a, b) -> a));
-
-        Map<Long, String> catNames = catIds.isEmpty() ? Collections.emptyMap() :
-                categoryMapper.selectBatchIds(catIds).stream().collect(Collectors.toMap(ShopCategory::getId, ShopCategory::getName, (a, b) -> a));
+        Map<Long, String> brandNames = CatalogLookupHelper.loadBrandNames(brandMapper, brandIds);
+        Map<Long, String> catNames = CatalogLookupHelper.loadCategoryNames(categoryMapper, catIds);
 
         return products.stream().map(p -> new ProductCardVO(
                 p.getId(),

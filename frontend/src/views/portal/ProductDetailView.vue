@@ -1,214 +1,267 @@
 <template>
-  <div class="product-detail-container" v-loading="loading">
-    <template v-if="product">
-      <!-- Breadcrumb -->
-      <div class="detail-breadcrumb">
-        <el-breadcrumb separator="/">
-          <el-breadcrumb-item :to="{ path: '/' }">首页</el-breadcrumb-item>
-          <el-breadcrumb-item :to="{ path: '/products' }">商品中心</el-breadcrumb-item>
-          <el-breadcrumb-item
+  <div class="detail-page">
+    <div class="page-container" v-loading="loading">
+      <template v-if="product">
+        <!-- 面包屑 -->
+        <nav class="crumbs" aria-label="面包屑">
+          <router-link to="/" class="crumb">首页</router-link>
+          <span class="crumb-sep">/</span>
+          <router-link to="/products" class="crumb">商品中心</router-link>
+          <span class="crumb-sep">/</span>
+          <router-link
             :to="{ path: '/products', query: { categoryId: product.categoryId } }"
+            class="crumb"
           >
             {{ product.categoryName }}
-          </el-breadcrumb-item>
-          <el-breadcrumb-item>{{ product.name }}</el-breadcrumb-item>
-        </el-breadcrumb>
-      </div>
+          </router-link>
+          <span class="crumb-sep">/</span>
+          <span class="crumb is-current">{{ product.name }}</span>
+        </nav>
 
-      <!-- Main Showcase Section -->
-      <div class="detail-hero-card">
-        <!-- Left: Image Gallery & Thumbnail Switcher -->
-        <div class="gallery-column">
-          <div class="main-preview-box">
-            <el-image
-              :src="activeImage"
-              fit="contain"
-              class="main-preview-img"
-              :preview-src-list="galleryImages"
-            >
-              <template #error>
-                <div class="gallery-placeholder">暂无主图</div>
-              </template>
-            </el-image>
-            <div class="zoom-hint">点击查看高清大图</div>
-          </div>
+        <!-- 主展示 -->
+        <div class="showcase">
+          <!-- 图集 -->
+          <div class="gallery">
+            <div class="main-frame">
+              <span class="corner tl" aria-hidden="true"></span>
+              <span class="corner tr" aria-hidden="true"></span>
+              <span class="corner bl" aria-hidden="true"></span>
+              <span class="corner br" aria-hidden="true"></span>
+              <el-image
+                :src="activeImage"
+                fit="contain"
+                class="main-img"
+                :preview-src-list="galleryImages"
+                :initial-index="Math.max(0, galleryImages.indexOf(activeImage))"
+                preview-teleported
+              >
+                <template #error>
+                  <div class="gallery-fallback"><el-icon><Picture /></el-icon></div>
+                </template>
+              </el-image>
+              <span class="zoom-hint mono">CLICK TO ZOOM</span>
+            </div>
 
-          <!-- Thumbnails Strip -->
-          <div class="thumbnails-strip" v-if="galleryImages.length > 1">
-            <div
-              v-for="(img, idx) in galleryImages"
-              :key="idx"
-              class="thumb-item"
-              :class="{ active: img === activeImage }"
-              @mouseenter="activeImage = img"
-              @click="activeImage = img"
-            >
-              <el-image :src="img" fit="cover" class="thumb-img" />
+            <div v-if="galleryImages.length > 1" class="thumbs">
+              <button
+                v-for="(img, idx) in galleryImages"
+                :key="idx"
+                type="button"
+                class="thumb"
+                :class="{ 'is-active': img === activeImage }"
+                @mouseenter="activeImage = img"
+                @click="activeImage = img"
+              >
+                <el-image :src="img" fit="cover" class="thumb-img" />
+              </button>
             </div>
           </div>
-        </div>
 
-        <!-- Right: Meta, Pricing, Stock & Actions -->
-        <div class="meta-column">
-          <!-- Brand Pill -->
-          <div class="brand-pill" @click="$router.push({ path: '/products', query: { brandId: product.brandId } })">
-            <el-avatar
-              v-if="product.brandLogo"
-              :size="24"
-              :src="product.brandLogo"
-              class="brand-mini-logo"
-            />
-            <span class="brand-name">{{ product.brandName }}</span>
-            <el-tag size="small" type="primary" round effect="light">品牌官方直营</el-tag>
-            <el-tag v-if="product.brandOrigin" size="small" type="info" round effect="light">产地: {{ product.brandOrigin }}</el-tag>
-          </div>
-
-          <h1 class="product-title">{{ product.name }}</h1>
-          <p class="product-tagline" v-if="product.subtitle">{{ product.subtitle }}</p>
-
-          <!-- Price Panel -->
-          <div class="price-panel">
-            <div class="price-row">
-              <span class="price-label">售价</span>
-              <span class="currency-symbol">¥</span>
-              <span class="current-price">{{ Number(product.price).toFixed(2) }}</span>
-              <span
-                v-if="product.originalPrice && product.originalPrice > product.price"
-                class="original-price"
-              >
-                ¥{{ Number(product.originalPrice).toFixed(2) }}
+          <!-- 信息 -->
+          <div class="info">
+            <router-link
+              :to="{ path: '/products', query: { brandId: product.brandId } }"
+              class="brand-line"
+            >
+              <span class="brand-avatar">
+                <el-image v-if="product.brandLogo" :src="product.brandLogo" fit="cover" class="brand-avatar-img">
+                  <template #error>{{ product.brandName.slice(0, 2) }}</template>
+                </el-image>
+                <template v-else>{{ product.brandName.slice(0, 2) }}</template>
               </span>
-              <el-tag
-                v-if="product.originalPrice && product.originalPrice > product.price"
-                type="danger"
-                size="small"
-                effect="dark"
-                round
-              >
-                优惠 ¥{{ (product.originalPrice - product.price).toFixed(2) }}
-              </el-tag>
-            </div>
+              <span class="brand-name">{{ product.brandName }}</span>
+              <span class="brand-tag mono">OFFICIAL</span>
+              <span v-if="product.brandOrigin" class="brand-origin">产地 · {{ product.brandOrigin }}</span>
+            </router-link>
 
-            <div class="service-row">
-              <span class="service-label">保障</span>
-              <div class="service-tags">
-                <span class="s-tag"><el-icon><Check /></el-icon> 官方正品</span>
-                <span class="s-tag"><el-icon><Van /></el-icon> 顺丰包邮</span>
-                <span class="s-tag"><el-icon><Service /></el-icon> 7天无理由退换</span>
-                <span class="s-tag"><el-icon><Finished /></el-icon> 极速发货</span>
+            <h1 class="product-title">{{ product.name }}</h1>
+            <p v-if="product.subtitle" class="product-sub">{{ product.subtitle }}</p>
+
+            <!-- 价格面板 -->
+            <div class="price-panel">
+              <div class="price-main">
+                <span class="price-label">售价</span>
+                <span class="price">
+                  <span class="symbol">¥</span>
+                  <span class="amount">{{ Number(product.price).toFixed(2) }}</span>
+                </span>
+                <span
+                  v-if="product.originalPrice && product.originalPrice > product.price"
+                  class="price-original"
+                >
+                  ¥{{ Number(product.originalPrice).toFixed(2) }}
+                </span>
+                <span
+                  v-if="product.originalPrice && product.originalPrice > product.price"
+                  class="save-badge"
+                >
+                  立省 ¥{{ (product.originalPrice - product.price).toFixed(2) }}
+                </span>
+              </div>
+
+              <div class="service-line">
+                <span class="service-item"><el-icon><Select /></el-icon> 官方正品</span>
+                <span class="service-item"><el-icon><Van /></el-icon> 顺丰包邮</span>
+                <span class="service-item"><el-icon><RefreshLeft /></el-icon> 7 天无理由</span>
+                <span class="service-item"><el-icon><Timer /></el-icon> 48H 发货</span>
               </div>
             </div>
-          </div>
 
-          <!-- Stock & Category Info -->
-          <div class="props-list">
-            <div class="prop-item">
-              <span class="prop-label">商品品类</span>
-              <span class="prop-value">{{ product.categoryName }}</span>
-            </div>
-            <div class="prop-item" v-if="product.brandOrigin">
-              <span class="prop-label">品牌产地</span>
-              <span class="prop-value">{{ product.brandOrigin }}</span>
-            </div>
-            <div class="prop-item">
-              <span class="prop-label">库存状态</span>
-              <span
-                class="prop-value"
-                :class="{ 'in-stock': product.stock > 0, 'out-of-stock': product.stock <= 0 }"
-              >
-                {{ product.stock > 0 ? `现货充足 (${product.stock} 件)` : '已售罄缺货' }}
-              </span>
-            </div>
-            <div class="prop-item">
-              <span class="prop-label">上架状态</span>
-              <span class="prop-value">
-                <el-tag :type="product.status === 1 ? 'success' : 'info'" size="small">
-                  {{ product.status === 1 ? '正常销售中' : '已下架' }}
-                </el-tag>
-              </span>
-            </div>
-          </div>
+            <!-- 规格 -->
+            <dl class="spec-list">
+              <div class="spec-row">
+                <dt>商品品类</dt>
+                <dd>{{ product.categoryName }}</dd>
+              </div>
+              <div class="spec-row" v-if="product.brandOrigin">
+                <dt>品牌产地</dt>
+                <dd>{{ product.brandOrigin }}</dd>
+              </div>
+              <div class="spec-row">
+                <dt>库存状态</dt>
+                <dd :class="product.stock > 0 ? 'is-ok' : 'is-bad'">
+                  {{ product.stock > 0 ? `现货 ${product.stock} 件` : '已售罄' }}
+                </dd>
+              </div>
+            </dl>
 
-          <!-- Purchase Quantity Stepper -->
-          <div class="quantity-row" v-if="product.status === 1 && product.stock > 0">
-            <span class="qty-label">选购数量</span>
-            <el-input-number
-              v-model="quantity"
-              :min="1"
-              :max="product.stock"
-              size="large"
-            />
-            <span class="qty-stock-tip">（最多可选购 {{ product.stock }} 件）</span>
-          </div>
+            <!-- 购买 -->
+            <div v-if="product.status === 1 && product.stock > 0" class="buy-block">
+              <div class="qty-line">
+                <span class="qty-label">选购数量</span>
+                <el-input-number v-model="quantity" :min="1" :max="product.stock" size="large" />
+                <span class="qty-tip">库存 {{ product.stock }} 件</span>
+              </div>
 
-          <!-- Action Buttons -->
-          <div class="actions-row">
-            <el-button
-              type="warning"
-              size="large"
-              :icon="ShoppingCart"
-              class="action-btn cart-btn"
-              :disabled="product.status !== 1 || product.stock <= 0"
-              @click="handleAddToCart"
-            >
-              加入购物车
-            </el-button>
-            <el-button
-              type="danger"
-              size="large"
-              class="action-btn buy-btn"
-              :disabled="product.status !== 1 || product.stock <= 0"
-              @click="handleBuyNow"
-            >
-              立即购买
-            </el-button>
+              <div class="actions">
+                <button class="btn btn--ghost action-ghost" type="button" :disabled="submitting" @click="handleAddToCart">
+                  <el-icon><ShoppingCart /></el-icon>
+                  加入购物车
+                </button>
+                <button class="btn btn--primary action-main" type="button" :disabled="submitting" @click="handleBuyNow">
+                  立即购买
+                  <el-icon><Right /></el-icon>
+                </button>
+              </div>
+            </div>
+
+            <div v-else class="sold-out">
+              <span class="sold-out-dot"></span>
+              该商品暂时无法购买，请移步同类商品
+            </div>
           </div>
         </div>
-      </div>
 
-      <!-- Detail Rich Text Section -->
-      <div class="detail-body-card">
-        <el-tabs v-model="activeTab" class="detail-tabs">
-          <el-tab-pane label="商品详情规格" name="details">
-            <div class="rich-html-content" v-if="product.detailHtml" v-html="product.detailHtml"></div>
-            <div v-else class="empty-rich">
-              <p>商家暂未录入富文本详情，如有疑问请咨询官方客服。</p>
-            </div>
-          </el-tab-pane>
-          <el-tab-pane label="服务与售后" name="service">
-            <div class="service-content">
-              <h3>官方服务承诺</h3>
-              <p>1. <strong>100% 正品保证</strong>：全场商品均来自正规渠道与官方授权，假一赔十。</p>
-              <p>2. <strong>7天无理由退换</strong>：在签收货物后7天内，商品及包装完好无损可申请退换货服务。</p>
-              <p>3. <strong>闪电配送</strong>：现货订单在工作日 16:00 前完成支付的当天发出，支持全程顺丰物流追踪。</p>
-            </div>
-          </el-tab-pane>
-        </el-tabs>
-      </div>
-    </template>
+        <!-- 详情 -->
+        <section class="detail-section" v-reveal>
+          <div class="tabs">
+            <button
+              type="button"
+              class="tab"
+              :class="{ 'is-active': activeTab === 'details' }"
+              @click="activeTab = 'details'"
+            >
+              商品详情
+            </button>
+            <button
+              type="button"
+              class="tab"
+              :class="{ 'is-active': activeTab === 'service' }"
+              @click="activeTab = 'service'"
+            >
+              服务与售后
+            </button>
+          </div>
 
-    <div v-else-if="!loading" class="not-found-card">
-      <el-empty description="抱歉，该商品不存在或已被管理员下架">
-        <el-button type="primary" @click="$router.push('/products')">返回商品中心</el-button>
-      </el-empty>
+          <div v-if="activeTab === 'details'" class="tab-body">
+            <div v-if="safeDetailHtml" class="rich-html" v-html="safeDetailHtml"></div>
+            <div v-else class="tab-empty">
+              商家暂未录入富文本详情，如有疑问请咨询官方客服。
+            </div>
+          </div>
+
+          <div v-else class="tab-body service-body">
+            <div class="service-card">
+              <span class="service-no mono">01</span>
+              <h4>100% 正品保证</h4>
+              <p>全场商品均来自正规渠道与官方授权，支持假一赔十。</p>
+            </div>
+            <div class="service-card">
+              <span class="service-no mono">02</span>
+              <h4>7 天无理由退换</h4>
+              <p>签收后 7 天内，商品及包装完好即可申请退换货服务。</p>
+            </div>
+            <div class="service-card">
+              <span class="service-no mono">03</span>
+              <h4>闪电配送</h4>
+              <p>现货订单工作日 16:00 前支付当天发出，支持全程物流追踪。</p>
+            </div>
+          </div>
+        </section>
+
+        <!-- 同类推荐 -->
+        <section v-if="relatedProducts.length > 0" class="related-section">
+          <div class="section-head">
+            <div>
+              <span class="eyebrow">YOU MAY ALSO LIKE</span>
+              <h2 class="section-title" style="margin-top: 10px">同类好物</h2>
+            </div>
+            <router-link
+              :to="{ path: '/products', query: { categoryId: product.categoryId } }"
+              class="btn btn--ghost btn--sm"
+            >
+              查看全部
+              <el-icon><Right /></el-icon>
+            </router-link>
+          </div>
+          <div class="related-grid">
+            <ProductCard
+              v-for="(item, idx) in relatedProducts"
+              :key="item.id"
+              :product="item"
+              :index="idx"
+              v-reveal="idx * 60"
+            />
+          </div>
+        </section>
+      </template>
+
+      <!-- 未找到 -->
+      <div v-else-if="!loading" class="not-found">
+        <span class="not-found-code mono">404</span>
+        <h2>商品不存在或已下架</h2>
+        <p>它可能已被管理员移除，去看看别的商品吧</p>
+        <button class="btn btn--primary btn--sm" type="button" @click="$router.push('/products')">
+          返回商品中心
+        </button>
+      </div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import {
   ShoppingCart,
-  Check,
+  Right,
+  Picture,
+  Select,
   Van,
-  Service,
-  Finished
+  RefreshLeft,
+  Timer
 } from '@element-plus/icons-vue'
-import { getProductDetailApi, type ProductDetail } from '@/api/product'
+import {
+  getProductDetailApi,
+  searchProductsApi,
+  type ProductDetail,
+  type ProductCard as ProductCardModel
+} from '@/api/product'
+import DOMPurify from 'dompurify'
 import { useCartStore } from '@/stores/cart'
 import { useUserStore } from '@/stores/user'
+import ProductCard from '@/components/ProductCard.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -219,7 +272,14 @@ const loading = ref(false)
 const product = ref<ProductDetail | null>(null)
 const activeImage = ref('')
 const quantity = ref(1)
-const activeTab = ref('details')
+const activeTab = ref<'details' | 'service'>('details')
+const relatedProducts = ref<ProductCardModel[]>([])
+const submitting = ref(false)
+
+// 富文本详情来自管理端录入，渲染前做白名单净化，避免脚本/事件属性在访客浏览器执行
+const safeDetailHtml = computed(() =>
+  product.value?.detailHtml ? DOMPurify.sanitize(product.value.detailHtml) : ''
+)
 
 const galleryImages = computed(() => {
   if (!product.value) return []
@@ -237,53 +297,102 @@ const galleryImages = computed(() => {
   return list
 })
 
+// 商品切换时详情与推荐请求可能乱序返回，只采纳最后一次请求的结果
+let detailRequestSeq = 0
+let relatedRequestSeq = 0
+
+async function fetchRelated(categoryId: number, excludeId: number) {
+  const seq = ++relatedRequestSeq
+  relatedProducts.value = []
+  try {
+    const res = await searchProductsApi({ categoryId, pageNum: 1, pageSize: 5 })
+    if (seq !== relatedRequestSeq) return
+    relatedProducts.value = (res?.records || [])
+      .filter((item) => item.id !== excludeId)
+      .slice(0, 4)
+  } catch (err) {
+    console.error('加载同类推荐失败', err)
+  }
+}
+
 async function fetchDetail() {
+  const seq = ++detailRequestSeq
+  // 商品切换时同时作废上一件商品尚未返回的同类推荐
+  relatedRequestSeq += 1
   const id = Number(route.params.id)
-  if (!id) return
+  if (!id || Number.isNaN(id)) {
+    product.value = null
+    activeImage.value = ''
+    relatedProducts.value = []
+    loading.value = false
+    return
+  }
 
   loading.value = true
+  product.value = null
+  activeImage.value = ''
+  relatedProducts.value = []
   try {
     const res = await getProductDetailApi(id)
+    if (seq !== detailRequestSeq) return
     if (res) {
       product.value = res
       activeImage.value = res.mainImage || (res.subImages?.[0] ?? '')
+      fetchRelated(res.categoryId, res.id)
     }
   } catch (err) {
     console.error('获取商品详情失败', err)
   } finally {
-    loading.value = false
+    if (seq === detailRequestSeq) {
+      loading.value = false
+    }
   }
 }
 
 async function handleAddToCart() {
-  if (!product.value) return
+  if (!product.value || submitting.value) return
   if (!userStore.isLoggedIn) {
     ElMessage.warning('请先登录账号后再加购商品')
     router.push({ path: '/login', query: { redirect: route.fullPath } })
     return
   }
+  submitting.value = true
   try {
     await cartStore.addToCart(product.value.id, quantity.value)
     ElMessage.success(`已成功将 ${quantity.value} 件【${product.value.name}】加入购物车`)
   } catch (err: any) {
-    ElMessage.error(err.message || '加入购物车失败')
+    console.error('加入购物车失败', err)
+  } finally {
+    submitting.value = false
   }
 }
 
 async function handleBuyNow() {
-  if (!product.value) return
+  if (!product.value || submitting.value) return
   if (!userStore.isLoggedIn) {
     ElMessage.warning('请先登录账号后再结算商品')
     router.push({ path: '/login', query: { redirect: route.fullPath } })
     return
   }
+  submitting.value = true
   try {
     await cartStore.addToCart(product.value.id, quantity.value)
     router.push('/cart')
   } catch (err: any) {
-    ElMessage.error(err.message || '立即购买失败')
+    console.error('立即购买失败', err)
+  } finally {
+    submitting.value = false
   }
 }
+
+watch(
+  () => route.params.id,
+  () => {
+    quantity.value = 1
+    activeTab.value = 'details'
+    fetchDetail()
+  }
+)
 
 onMounted(() => {
   fetchDetail()
@@ -291,70 +400,140 @@ onMounted(() => {
 </script>
 
 <style scoped>
-.product-detail-container {
-  max-width: 1200px;
-  margin: 0 auto;
-  padding: 24px 16px;
+.detail-page {
+  padding-top: 24px;
 }
 
-.detail-breadcrumb {
-  margin-bottom: 20px;
-}
-
-.detail-hero-card {
-  background: #fff;
-  border-radius: 16px;
-  padding: 32px;
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.04);
-  border: 1px solid #f1f5f9;
-  display: flex;
-  gap: 40px;
-  margin-bottom: 32px;
-}
-
-/* Gallery Column */
-.gallery-column {
-  width: 460px;
-  flex-shrink: 0;
-}
-
-.main-preview-box {
-  width: 100%;
-  height: 420px;
-  border-radius: 12px;
-  background: #f8fafc;
-  overflow: hidden;
-  position: relative;
+/* 面包屑 */
+.crumbs {
   display: flex;
   align-items: center;
-  justify-content: center;
-  border: 1px solid #e2e8f0;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 10px 0 28px;
+  font-size: 12px;
+  color: var(--text-3);
 }
 
-.main-preview-img {
+.crumb {
+  transition: color 0.25s var(--ease);
+}
+
+.crumb:hover {
+  color: var(--cyan);
+}
+
+.crumb.is-current {
+  color: var(--text-2);
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.crumb-sep {
+  color: var(--text-4);
+  opacity: 0.5;
+}
+
+/* 展示 */
+.showcase {
+  display: grid;
+  grid-template-columns: minmax(0, 1.02fr) minmax(0, 1fr);
+  gap: clamp(28px, 4vw, 56px);
+  align-items: start;
+}
+
+/* 图集 */
+.gallery {
+  position: sticky;
+  top: 96px;
+}
+
+.main-frame {
+  position: relative;
+  aspect-ratio: 1 / 1;
+  border-radius: var(--radius-xl);
+  border: 1px solid var(--line);
+  background: radial-gradient(circle at 50% 40%, #141a2c 0%, #080a12 100%);
+  overflow: hidden;
+  box-shadow: var(--shadow-card), inset 0 0 90px rgba(124, 92, 255, 0.08);
+}
+
+.main-frame::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at 70% 15%, rgba(34, 211, 238, 0.1), transparent 55%);
+  pointer-events: none;
+}
+
+.main-img {
   width: 100%;
   height: 100%;
   cursor: zoom-in;
 }
 
-.gallery-placeholder {
-  color: #94a3b8;
-  font-size: 14px;
+.gallery-fallback {
+  width: 100%;
+  height: 100%;
+  display: grid;
+  place-items: center;
+  color: var(--text-4);
+  font-size: 34px;
+}
+
+/* 四角标记 */
+.corner {
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  z-index: 2;
+  border-color: rgba(34, 211, 238, 0.7);
+  border-style: solid;
+  border-width: 0;
+  pointer-events: none;
+}
+
+.corner.tl {
+  top: 14px;
+  left: 14px;
+  border-top-width: 1px;
+  border-left-width: 1px;
+}
+
+.corner.tr {
+  top: 14px;
+  right: 14px;
+  border-top-width: 1px;
+  border-right-width: 1px;
+}
+
+.corner.bl {
+  bottom: 14px;
+  left: 14px;
+  border-bottom-width: 1px;
+  border-left-width: 1px;
+}
+
+.corner.br {
+  bottom: 14px;
+  right: 14px;
+  border-bottom-width: 1px;
+  border-right-width: 1px;
 }
 
 .zoom-hint {
   position: absolute;
-  bottom: 12px;
-  right: 12px;
-  background: rgba(15, 23, 42, 0.6);
-  color: #fff;
-  font-size: 11px;
-  padding: 3px 8px;
-  border-radius: 4px;
-  pointer-events: none;
+  right: 18px;
+  bottom: 16px;
+  z-index: 2;
+  font-size: 9px;
+  letter-spacing: 0.2em;
+  color: var(--text-4);
 }
 
-.thumbnails-strip {
+.thumbs {
   display: flex;
   gap: 12px;
   margin-top: 16px;
@@ -362,21 +541,26 @@ onMounted(() => {
   padding-bottom: 4px;
 }
 
-.thumb-item {
-  width: 72px;
-  height: 72px;
-  border-radius: 8px;
-  overflow: hidden;
-  border: 2px solid #e2e8f0;
-  cursor: pointer;
-  transition: all 0.2s;
+.thumb {
+  width: 76px;
+  height: 76px;
   flex-shrink: 0;
+  padding: 0;
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  background: #0b0e18;
+  overflow: hidden;
+  cursor: pointer;
+  transition: all 0.3s var(--ease);
 }
 
-.thumb-item.active {
-  border-color: #409eff;
-  transform: translateY(-2px);
-  box-shadow: 0 4px 10px rgba(64, 158, 255, 0.2);
+.thumb:hover {
+  border-color: rgba(255, 255, 255, 0.28);
+}
+
+.thumb.is-active {
+  border-color: rgba(124, 92, 255, 0.9);
+  box-shadow: 0 0 0 3px rgba(124, 92, 255, 0.18);
 }
 
 .thumb-img {
@@ -384,225 +568,433 @@ onMounted(() => {
   height: 100%;
 }
 
-/* Meta Column */
-.meta-column {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
+/* 信息 */
+.info {
+  padding-top: 6px;
 }
 
-.brand-pill {
+.brand-line {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  background: #f8fafc;
-  padding: 4px 12px 4px 6px;
-  border-radius: 20px;
-  width: fit-content;
-  cursor: pointer;
-  margin-bottom: 14px;
-  border: 1px solid #e2e8f0;
-  transition: all 0.2s;
+  gap: 10px;
+  padding: 5px 14px 5px 5px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.04);
+  transition: all 0.3s var(--ease);
 }
 
-.brand-pill:hover {
-  border-color: #409eff;
-  background: #ecf5ff;
+.brand-line:hover {
+  border-color: rgba(124, 92, 255, 0.5);
+  background: rgba(124, 92, 255, 0.1);
+}
+
+.brand-avatar {
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  overflow: hidden;
+  background: rgba(124, 92, 255, 0.2);
+  color: #c4b8ff;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.brand-avatar-img {
+  width: 100%;
+  height: 100%;
 }
 
 .brand-name {
-  font-size: 13px;
+  font-size: 12.5px;
   font-weight: 600;
-  color: #1e293b;
+  color: var(--text);
+}
+
+.brand-tag {
+  font-size: 9px;
+  letter-spacing: 0.16em;
+  color: var(--cyan);
+}
+
+.brand-origin {
+  padding-left: 10px;
+  border-left: 1px solid var(--line);
+  font-size: 11px;
+  color: var(--text-3);
 }
 
 .product-title {
-  font-size: 24px;
-  font-weight: 800;
-  color: #0f172a;
-  line-height: 1.35;
-  margin-bottom: 10px;
+  margin-top: 22px;
+  font-size: clamp(26px, 3vw, 38px);
+  font-weight: 700;
+  line-height: 1.22;
+  letter-spacing: -0.03em;
 }
 
-.product-tagline {
+.product-sub {
+  margin-top: 12px;
   font-size: 14px;
-  color: #64748b;
-  line-height: 1.5;
-  margin-bottom: 20px;
+  color: var(--text-2);
+  line-height: 1.7;
 }
 
-/* Price Panel */
+/* 价格 */
 .price-panel {
-  background: #f8fafc;
-  border-radius: 12px;
-  padding: 20px;
-  margin-bottom: 24px;
-  border-left: 4px solid #ef4444;
+  margin-top: 28px;
+  padding: 22px 24px;
+  border: 1px solid rgba(124, 92, 255, 0.24);
+  border-radius: var(--radius-lg);
+  background: linear-gradient(135deg, rgba(124, 92, 255, 0.12), rgba(34, 211, 238, 0.04));
 }
 
-.price-row {
+.price-main {
   display: flex;
   align-items: baseline;
-  gap: 8px;
-  margin-bottom: 16px;
+  gap: 12px;
+  flex-wrap: wrap;
 }
 
 .price-label {
+  font-size: 12px;
+  color: var(--text-3);
+}
+
+.price-main .price .amount {
+  font-size: 40px;
+  line-height: 1;
+}
+
+.price-original {
   font-size: 13px;
-  color: #64748b;
-}
-
-.currency-symbol {
-  font-size: 18px;
-  font-weight: 700;
-  color: #ef4444;
-}
-
-.current-price {
-  font-size: 32px;
-  font-weight: 800;
-  color: #ef4444;
-}
-
-.original-price {
-  font-size: 14px;
-  color: #94a3b8;
+  color: var(--text-4);
   text-decoration: line-through;
-  margin-left: 6px;
 }
 
-.service-row {
+.save-badge {
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: rgba(255, 92, 122, 0.14);
+  border: 1px solid rgba(255, 92, 122, 0.35);
+  color: #ff9db0;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.service-line {
   display: flex;
+  flex-wrap: wrap;
+  gap: 18px;
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+
+.service-item {
+  display: inline-flex;
   align-items: center;
-  gap: 12px;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-2);
+}
+
+.service-item .el-icon {
+  color: var(--cyan);
   font-size: 13px;
 }
 
-.service-label {
-  color: #64748b;
-  font-weight: 500;
+/* 规格 */
+.spec-list {
+  margin: 26px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 0;
 }
 
-.service-tags {
-  display: flex;
-  gap: 16px;
-  color: #475569;
-}
-
-.s-tag {
+.spec-row {
   display: flex;
   align-items: center;
-  gap: 4px;
+  padding: 13px 4px;
+  border-bottom: 1px dashed var(--line);
 }
 
-/* Props List */
-.props-list {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  margin-bottom: 24px;
-  padding: 0 4px;
+.spec-row dt {
+  width: 96px;
+  font-size: 12.5px;
+  color: var(--text-3);
 }
 
-.prop-item {
-  display: flex;
+.spec-row dd {
+  margin: 0;
   font-size: 13px;
+  color: var(--text);
 }
 
-.prop-label {
-  width: 80px;
-  color: #64748b;
+.spec-row dd.is-ok {
+  color: var(--green);
 }
 
-.prop-value {
-  color: #1e293b;
-  font-weight: 500;
+.spec-row dd.is-bad {
+  color: var(--price);
 }
 
-.in-stock {
-  color: #10b981;
+/* 购买 */
+.buy-block {
+  margin-top: 28px;
 }
 
-.out-of-stock {
-  color: #ef4444;
-}
-
-/* Quantity Row */
-.quantity-row {
+.qty-line {
   display: flex;
   align-items: center;
   gap: 16px;
-  margin-bottom: 28px;
-  padding: 0 4px;
+  margin-bottom: 20px;
 }
 
 .qty-label {
   font-size: 13px;
-  color: #64748b;
-  font-weight: 500;
+  color: var(--text-2);
 }
 
-.qty-stock-tip {
-  font-size: 12px;
-  color: #94a3b8;
+.qty-tip {
+  font-size: 11.5px;
+  color: var(--text-4);
 }
 
-/* Action Buttons */
-.actions-row {
+.actions {
   display: flex;
-  gap: 16px;
-  margin-top: auto;
+  gap: 14px;
 }
 
-.action-btn {
+.action-ghost,
+.action-main {
   flex: 1;
-  height: 48px;
-  font-size: 16px;
-  font-weight: 600;
-  border-radius: 24px;
-}
-
-/* Detail Body Tabs */
-.detail-body-card {
-  background: #fff;
-  border-radius: 16px;
-  padding: 28px 32px;
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.04);
-  border: 1px solid #f1f5f9;
-}
-
-.rich-html-content {
-  line-height: 1.8;
-  color: #334155;
+  height: 54px;
+  border-radius: 999px;
   font-size: 15px;
 }
 
-.rich-html-content :deep(img) {
+.sold-out {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 28px;
+  padding: 18px 20px;
+  border: 1px solid rgba(255, 92, 122, 0.3);
+  border-radius: var(--radius);
+  background: rgba(255, 92, 122, 0.08);
+  font-size: 13px;
+  color: #ff9db0;
+}
+
+.sold-out-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--price);
+  box-shadow: 0 0 10px var(--price);
+}
+
+/* 详情 */
+.detail-section {
+  margin-top: 64px;
+  padding: 28px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xl);
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.tabs {
+  display: flex;
+  gap: 6px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 26px;
+}
+
+.tab {
+  position: relative;
+  padding: 12px 20px;
+  border: none;
+  background: none;
+  color: var(--text-3);
+  font-family: var(--font-body);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: color 0.25s var(--ease);
+}
+
+.tab::after {
+  content: '';
+  position: absolute;
+  left: 20px;
+  right: 20px;
+  bottom: -1px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--grad);
+  transform: scaleX(0);
+  transition: transform 0.35s var(--ease);
+}
+
+.tab.is-active {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.tab.is-active::after {
+  transform: scaleX(1);
+}
+
+.tab-body {
+  animation: fade-in 0.4s var(--ease);
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.rich-html {
+  font-size: 14.5px;
+  line-height: 1.9;
+  color: var(--text-2);
+}
+
+.rich-html :deep(img) {
   max-width: 100%;
-  border-radius: 8px;
+  border-radius: var(--radius);
+  margin: 16px 0;
 }
 
-.empty-rich {
-  padding: 40px 0;
+.rich-html :deep(h1),
+.rich-html :deep(h2),
+.rich-html :deep(h3) {
+  color: var(--text);
+  margin: 20px 0 10px;
+}
+
+.rich-html :deep(a) {
+  color: var(--cyan);
+}
+
+.tab-empty {
+  padding: 50px 0;
   text-align: center;
-  color: #94a3b8;
+  font-size: 13px;
+  color: var(--text-4);
 }
 
-.service-content {
-  line-height: 2;
-  color: #475569;
+.service-body {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
 }
 
-.service-content h3 {
-  font-size: 16px;
-  color: #1e293b;
-  margin-bottom: 12px;
+.service-card {
+  padding: 22px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, 0.025);
 }
 
-.not-found-card {
-  padding: 80px 0;
-  background: #fff;
-  border-radius: 16px;
+.service-no {
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  color: var(--violet);
+}
+
+.service-card h4 {
+  margin: 10px 0 8px;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.service-card p {
+  font-size: 12.5px;
+  line-height: 1.75;
+  color: var(--text-3);
+}
+
+/* 推荐 */
+.related-section {
+  margin-top: 72px;
+}
+
+.related-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 22px;
+}
+
+/* 404 */
+.not-found {
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  padding: 120px 24px;
+  text-align: center;
+}
+
+.not-found-code {
+  font-size: 12px;
+  letter-spacing: 0.4em;
+  color: var(--violet);
+}
+
+.not-found h2 {
+  font-size: 26px;
+  font-weight: 700;
+}
+
+.not-found p {
+  font-size: 13px;
+  color: var(--text-3);
+  margin-bottom: 10px;
+}
+
+/* 响应式 */
+@media (max-width: 1080px) {
+  .showcase {
+    grid-template-columns: 1fr;
+  }
+
+  .gallery {
+    position: static;
+    max-width: 560px;
+  }
+
+  .related-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .service-body {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 600px) {
+  .actions {
+    flex-direction: column;
+  }
+
+  .action-ghost {
+    order: 2;
+  }
+
+  .detail-section {
+    padding: 18px;
+  }
+
+  .related-grid {
+    grid-template-columns: 1fr;
+  }
 }
 </style>

@@ -33,7 +33,7 @@ public class StpInterfaceImpl implements StpInterface {
         try {
             Long userId = Long.valueOf(loginId.toString());
             SysUser user = sysUserMapper.selectById(userId);
-            if (user != null && user.getRole() != null && user.getStatus() == 1) {
+            if (user != null && user.getRole() != null && user.isActive()) {
                 return List.of(user.getRole());
             }
         } catch (Exception ignored) {

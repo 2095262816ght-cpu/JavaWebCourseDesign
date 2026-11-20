@@ -1,38 +1,53 @@
 <template>
-  <div class="product-list-container">
-    <!-- Breadcrumb & Top Bar -->
-    <div class="list-breadcrumb">
-      <el-breadcrumb separator="/">
-        <el-breadcrumb-item :to="{ path: '/' }">首页</el-breadcrumb-item>
-        <el-breadcrumb-item>商品中心</el-breadcrumb-item>
-        <el-breadcrumb-item v-if="selectedCategoryName">{{ selectedCategoryName }}</el-breadcrumb-item>
-        <el-breadcrumb-item v-if="selectedBrandName">{{ selectedBrandName }}</el-breadcrumb-item>
-      </el-breadcrumb>
-    </div>
+  <div class="catalog">
+    <!-- 页头 -->
+    <header class="catalog-head page-container">
+      <div>
+        <span class="eyebrow">PRODUCT CATALOG</span>
+        <h1 class="display-lg catalog-title">商品中心</h1>
+        <p class="catalog-sub">
+          共 <span class="mono catalog-count">{{ total }}</span> 件商品
+          <template v-if="selectedCategoryName"> · {{ selectedCategoryName }}</template>
+          <template v-if="selectedBrandName"> · {{ selectedBrandName }}</template>
+        </p>
+      </div>
+      <div class="head-actions">
+        <button class="btn btn--ghost btn--sm filter-toggle" type="button" @click="filtersOpen = !filtersOpen">
+          <el-icon><Operation /></el-icon>
+          {{ filtersOpen ? '收起筛选' : '展开筛选' }}
+        </button>
+        <button class="btn btn--ghost btn--sm" type="button" @click="resetFilters">
+          重置条件
+        </button>
+      </div>
+    </header>
 
-    <div class="list-layout">
-      <!-- Left Filter Sidebar -->
-      <aside class="filter-sidebar">
-        <div class="filter-card">
-          <div class="filter-card-header">
-            <span class="filter-title">多维商品筛选</span>
-            <el-button link type="primary" size="small" @click="resetFilters">重置全部</el-button>
+    <div class="catalog-body page-container">
+      <!-- 筛选侧栏 -->
+      <aside class="filter-rail" :class="{ 'is-open': filtersOpen }">
+        <div class="filter-panel">
+          <div class="filter-head">
+            <span class="mono filter-head-label">FILTERS</span>
+            <span class="filter-head-hint">多维组合筛选</span>
           </div>
 
-          <!-- Keyword Search -->
           <div class="filter-group">
-            <label class="filter-label">关键字检索</label>
-            <el-input
-              v-model="queryParams.keyword"
-              placeholder="搜索商品名称、型号..."
-              clearable
-              :prefix-icon="Search"
-              @keyup.enter="handleSearch"
-              @clear="handleSearch"
-            />
+            <label class="filter-label">关键字</label>
+            <div class="search-field">
+              <el-icon class="search-icon"><Search /></el-icon>
+              <input
+                v-model="queryParams.keyword"
+                class="field-input"
+                type="search"
+                placeholder="搜索商品名称、型号"
+                @keyup.enter="handleSearch"
+              />
+              <button v-if="queryParams.keyword" class="field-clear" type="button" @click="clearKeyword">
+                <el-icon><Close /></el-icon>
+              </button>
+            </div>
           </div>
 
-          <!-- Category Filter -->
           <div class="filter-group">
             <label class="filter-label">所属分类</label>
             <el-select
@@ -40,6 +55,7 @@
               placeholder="全部分类"
               clearable
               class="w-full"
+              popper-class="neon-select"
               @change="handleSearch"
             >
               <el-option label="全部分类" :value="undefined" />
@@ -52,197 +68,119 @@
             </el-select>
           </div>
 
-          <!-- Brand Filter -->
           <div class="filter-group">
-            <label class="filter-label">品牌筛选</label>
+            <label class="filter-label">品牌</label>
             <el-select
               v-model="queryParams.brandId"
               placeholder="全部品牌"
               clearable
               filterable
               class="w-full"
+              popper-class="neon-select"
               @change="handleSearch"
             >
               <el-option label="全部品牌" :value="undefined" />
-              <el-option
-                v-for="brand in brandList"
-                :key="brand.id"
-                :label="brand.name"
-                :value="brand.id"
-              />
+              <el-option v-for="brand in brandList" :key="brand.id" :label="brand.name" :value="brand.id" />
             </el-select>
           </div>
 
-          <!-- Price Range Filter -->
           <div class="filter-group">
             <label class="filter-label">价格区间 (¥)</label>
-            <div class="price-range-inputs">
+            <div class="price-range">
               <el-input-number
                 v-model="queryParams.minPrice"
                 :min="0"
                 :controls="false"
-                placeholder="最低价"
+                placeholder="最低"
                 class="price-input"
               />
-              <span class="range-divider">-</span>
+              <span class="range-line"></span>
               <el-input-number
                 v-model="queryParams.maxPrice"
                 :min="0"
                 :controls="false"
-                placeholder="最高价"
+                placeholder="最高"
                 class="price-input"
               />
             </div>
-            <el-button
-              type="primary"
-              plain
-              size="small"
-              class="apply-price-btn"
-              @click="handleSearch"
-            >
+            <button class="btn btn--primary btn--sm apply-btn" type="button" @click="handleSearch">
               应用价格筛选
-            </el-button>
+            </button>
           </div>
         </div>
       </aside>
 
-      <!-- Right Main Content Area -->
-      <main class="list-main">
-        <!-- Sort and Active Filters Header -->
-        <div class="main-toolbar">
-          <div class="toolbar-left">
-            <span class="result-count">
-              共找到 <strong>{{ total }}</strong> 件商品
-            </span>
-            <div class="active-tags">
-              <el-tag
-                v-if="queryParams.keyword"
-                closable
-                size="small"
-                @close="clearKeyword"
-              >
-                关键字: {{ queryParams.keyword }}
-              </el-tag>
-              <el-tag
-                v-if="selectedCategoryName"
-                closable
-                size="small"
-                type="success"
-                @close="clearCategory"
-              >
-                分类: {{ selectedCategoryName }}
-              </el-tag>
-              <el-tag
-                v-if="selectedBrandName"
-                closable
-                size="small"
-                type="warning"
-                @close="clearBrand"
-              >
-                品牌: {{ selectedBrandName }}
-              </el-tag>
-              <el-tag
-                v-if="queryParams.minPrice || queryParams.maxPrice"
-                closable
-                size="small"
-                type="info"
-                @close="clearPrice"
-              >
-                价格: ¥{{ queryParams.minPrice || 0 }} - ¥{{ queryParams.maxPrice || '∞' }}
-              </el-tag>
-            </div>
+      <!-- 商品区 -->
+      <main class="catalog-main">
+        <div class="toolbar">
+          <div class="sort-pills">
+            <button
+              v-for="option in sortOptions"
+              :key="option.value"
+              type="button"
+              class="sort-pill"
+              :class="{ 'is-active': queryParams.sortBy === option.value }"
+              @click="changeSort(option.value)"
+            >
+              {{ option.label }}
+            </button>
           </div>
 
-          <div class="toolbar-right">
-            <span class="sort-label">排序方式：</span>
-            <el-radio-group v-model="queryParams.sortBy" size="default" @change="handleSearch">
-              <el-radio-button label="">综合</el-radio-button>
-              <el-radio-button label="newest">新品优先</el-radio-button>
-              <el-radio-button label="price_asc">价格从低到高</el-radio-button>
-              <el-radio-button label="price_desc">价格从高到低</el-radio-button>
-            </el-radio-group>
+          <div class="active-chips">
+            <button v-if="queryParams.keyword" class="chip" type="button" @click="clearKeyword">
+              {{ queryParams.keyword }}
+              <el-icon><Close /></el-icon>
+            </button>
+            <button v-if="selectedCategoryName" class="chip" type="button" @click="clearCategory">
+              {{ selectedCategoryName }}
+              <el-icon><Close /></el-icon>
+            </button>
+            <button v-if="selectedBrandName" class="chip" type="button" @click="clearBrand">
+              {{ selectedBrandName }}
+              <el-icon><Close /></el-icon>
+            </button>
+            <button
+              v-if="queryParams.minPrice != null || queryParams.maxPrice != null"
+              class="chip"
+              type="button"
+              @click="clearPrice"
+            >
+              ¥{{ queryParams.minPrice ?? 0 }} - ¥{{ queryParams.maxPrice ?? '∞' }}
+              <el-icon><Close /></el-icon>
+            </button>
           </div>
         </div>
 
-        <!-- Product Cards Grid -->
-        <div class="product-cards-container" v-loading="loading">
-          <template v-if="productList.length > 0">
-            <div class="products-grid">
-              <div
-                v-for="item in productList"
-                :key="item.id"
-                class="catalog-product-card"
-                @click="goToDetail(item.id)"
-              >
-                <div class="card-thumb-wrap">
-                  <el-image
-                    :src="item.mainImage"
-                    fit="cover"
-                    class="card-img"
-                    loading="lazy"
-                  >
-                    <template #error>
-                      <div class="img-placeholder">暂无封面</div>
-                    </template>
-                  </el-image>
-                  <span class="card-brand-badge">{{ item.brandName }}</span>
-                </div>
-
-                <div class="card-details">
-                  <div class="card-cat-badge">
-                    <el-tag size="small" type="info" effect="plain">{{ item.categoryName }}</el-tag>
-                    <span class="stock-pill" :class="{ 'danger-stock': item.stock < 10 }">
-                      库存: {{ item.stock }}
-                    </span>
-                  </div>
-
-                  <h3 class="card-name" :title="item.name">{{ item.name }}</h3>
-                  <p class="card-sub" :title="item.subtitle">{{ item.subtitle || '官方现货正品 · 闪电发货' }}</p>
-
-                  <div class="card-footer">
-                    <div class="price-container">
-                      <span class="rmb">¥</span>
-                      <span class="main-price">{{ Number(item.price).toFixed(2) }}</span>
-                      <span
-                        v-if="item.originalPrice && item.originalPrice > item.price"
-                        class="strike-price"
-                      >
-                        ¥{{ Number(item.originalPrice).toFixed(2) }}
-                      </span>
-                    </div>
-
-                    <el-button
-                      type="primary"
-                      size="small"
-                      round
-                      @click.stop="goToDetail(item.id)"
-                    >
-                      查看详情
-                    </el-button>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <!-- Pagination Bar -->
-            <div class="pagination-bar">
-              <el-pagination
-                background
-                layout="total, prev, pager, next, jumper"
-                :current-page="queryParams.pageNum"
-                :page-size="queryParams.pageSize"
-                :total="total"
-                @current-change="handlePageChange"
-              />
-            </div>
-          </template>
-
-          <!-- Empty State -->
-          <div v-else-if="!loading" class="empty-wrap">
-            <el-empty description="未找到符合筛选条件的商品">
-              <el-button type="primary" @click="resetFilters">清空筛选条件</el-button>
-            </el-empty>
+        <div v-loading="loading" class="grid-wrap">
+          <div v-if="productList.length > 0" class="product-grid">
+            <ProductCard
+              v-for="(item, idx) in productList"
+              :key="item.id"
+              :product="item"
+              :index="idx"
+              v-reveal="(idx % 3) * 60"
+            />
           </div>
+
+          <div v-else-if="!loading" class="empty-state">
+            <span class="empty-orb"></span>
+            <h3 class="empty-title">没有符合条件的商品</h3>
+            <p class="empty-desc">试着放宽价格区间，或清空当前筛选条件</p>
+            <button class="btn btn--primary btn--sm" type="button" @click="resetFilters">
+              清空筛选条件
+            </button>
+          </div>
+        </div>
+
+        <div v-if="total > 0" class="pagination-bar">
+          <el-pagination
+            background
+            layout="prev, pager, next"
+            :current-page="queryParams.pageNum"
+            :page-size="queryParams.pageSize"
+            :total="total"
+            @current-change="handlePageChange"
+          />
         </div>
       </main>
     </div>
@@ -252,19 +190,28 @@
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Search } from '@element-plus/icons-vue'
-import { searchProductsApi, type ProductCard, type ProductQuery } from '@/api/product'
+import { Search, Close, Operation } from '@element-plus/icons-vue'
+import { searchProductsApi, type ProductCard as ProductCardModel, type ProductQuery } from '@/api/product'
 import { getPortalCategoryTreeApi, type CategoryNode } from '@/api/category'
-import { getFeaturedBrandsApi, type Brand } from '@/api/brand'
+import { getPortalBrandsApi, type Brand } from '@/api/brand'
+import ProductCard from '@/components/ProductCard.vue'
 
 const route = useRoute()
 const router = useRouter()
 
 const loading = ref(false)
 const total = ref(0)
-const productList = ref<ProductCard[]>([])
+const productList = ref<ProductCardModel[]>([])
 const brandList = ref<Brand[]>([])
 const categoryTree = ref<CategoryNode[]>([])
+const filtersOpen = ref(false)
+
+const sortOptions = [
+  { value: '', label: '综合排序' },
+  { value: 'newest', label: '新品优先' },
+  { value: 'price_asc', label: '价格 ↑' },
+  { value: 'price_desc', label: '价格 ↓' }
+]
 
 const queryParams = reactive<ProductQuery>({
   keyword: '',
@@ -277,7 +224,6 @@ const queryParams = reactive<ProductQuery>({
   pageSize: 12
 })
 
-// Flatten category tree for select dropdown with depth indentation
 interface FlatCategory {
   id: number
   name: string
@@ -300,22 +246,19 @@ const flatCategories = computed(() => {
 
 const selectedCategoryName = computed(() => {
   if (!queryParams.categoryId) return ''
-  const target = flatCategories.value.find(c => c.id === queryParams.categoryId)
+  const target = flatCategories.value.find((c) => c.id === queryParams.categoryId)
   return target ? target.name : ''
 })
 
 const selectedBrandName = computed(() => {
   if (!queryParams.brandId) return ''
-  const target = brandList.value.find(b => b.id === queryParams.brandId)
+  const target = brandList.value.find((b) => b.id === queryParams.brandId)
   return target ? target.name : ''
 })
 
 async function loadFilterMetadata() {
   try {
-    const [cats, brands] = await Promise.all([
-      getPortalCategoryTreeApi(),
-      getFeaturedBrandsApi(50)
-    ])
+    const [cats, brands] = await Promise.all([getPortalCategoryTreeApi(), getPortalBrandsApi()])
     categoryTree.value = cats || []
     brandList.value = brands || []
   } catch (err) {
@@ -323,7 +266,11 @@ async function loadFilterMetadata() {
   }
 }
 
+// 快速切换筛选/排序时，只采纳最后一次请求的响应，避免旧结果覆盖新列表
+let productRequestSeq = 0
+
 async function fetchProducts() {
+  const seq = ++productRequestSeq
   loading.value = true
   try {
     const res = await searchProductsApi({
@@ -336,6 +283,7 @@ async function fetchProducts() {
       pageNum: queryParams.pageNum,
       pageSize: queryParams.pageSize
     })
+    if (seq !== productRequestSeq) return
     if (res) {
       productList.value = res.records || []
       total.value = res.total || 0
@@ -343,13 +291,58 @@ async function fetchProducts() {
   } catch (err) {
     console.error('商品列表加载失败', err)
   } finally {
-    loading.value = false
+    if (seq === productRequestSeq) {
+      loading.value = false
+    }
+  }
+}
+
+function buildRouteQuery(): Record<string, string> {
+  const query: Record<string, string> = {}
+  if (queryParams.keyword?.trim()) query.keyword = queryParams.keyword.trim()
+  if (queryParams.categoryId != null) query.categoryId = String(queryParams.categoryId)
+  if (queryParams.brandId != null) query.brandId = String(queryParams.brandId)
+  if (queryParams.minPrice != null) query.minPrice = String(queryParams.minPrice)
+  if (queryParams.maxPrice != null) query.maxPrice = String(queryParams.maxPrice)
+  if (queryParams.sortBy) query.sortBy = queryParams.sortBy
+  return query
+}
+
+function getNormalizedCurrentRouteQuery(): Record<string, string> {
+  const current: Record<string, string> = {}
+  for (const key of ['keyword', 'categoryId', 'brandId', 'minPrice', 'maxPrice', 'sortBy']) {
+    const val = route.query[key]
+    if (val != null && String(val).trim() !== '') {
+      current[key] = String(val).trim()
+    }
+  }
+  return current
+}
+
+function applyFiltersAndFetch() {
+  queryParams.pageNum = 1
+  const nextQuery = buildRouteQuery()
+  const currentQuery = getNormalizedCurrentRouteQuery()
+  const nextKeys = Object.keys(nextQuery).sort()
+  const currentKeys = Object.keys(currentQuery).sort()
+  const isSame =
+    nextKeys.length === currentKeys.length &&
+    nextKeys.every((k, i) => k === currentKeys[i] && nextQuery[k] === currentQuery[k])
+
+  if (!isSame) {
+    router.replace({ path: '/products', query: nextQuery })
+  } else {
+    fetchProducts()
   }
 }
 
 function handleSearch() {
-  queryParams.pageNum = 1
-  fetchProducts()
+  applyFiltersAndFetch()
+}
+
+function changeSort(value: string) {
+  queryParams.sortBy = value
+  handleSearch()
 }
 
 function handlePageChange(page: number) {
@@ -365,8 +358,7 @@ function resetFilters() {
   queryParams.minPrice = undefined
   queryParams.maxPrice = undefined
   queryParams.sortBy = ''
-  queryParams.pageNum = 1
-  fetchProducts()
+  applyFiltersAndFetch()
 }
 
 function clearKeyword() {
@@ -390,16 +382,20 @@ function clearPrice() {
   handleSearch()
 }
 
-function goToDetail(id: number) {
-  router.push(`/product/${id}`)
+function parseOptionalNumber(val: unknown): number | undefined {
+  if (val == null || String(val).trim() === '') return undefined
+  const num = Number(val)
+  return Number.isNaN(num) ? undefined : num
 }
 
-// Sync route queries
 function initFromRoute() {
-  if (route.query.keyword) queryParams.keyword = String(route.query.keyword)
-  if (route.query.categoryId) queryParams.categoryId = Number(route.query.categoryId)
-  if (route.query.brandId) queryParams.brandId = Number(route.query.brandId)
-  if (route.query.sortBy) queryParams.sortBy = String(route.query.sortBy)
+  queryParams.keyword = route.query.keyword ? String(route.query.keyword) : ''
+  queryParams.categoryId = parseOptionalNumber(route.query.categoryId)
+  queryParams.brandId = parseOptionalNumber(route.query.brandId)
+  queryParams.minPrice = parseOptionalNumber(route.query.minPrice)
+  queryParams.maxPrice = parseOptionalNumber(route.query.maxPrice)
+  queryParams.sortBy = route.query.sortBy ? String(route.query.sortBy) : ''
+  queryParams.pageNum = 1
 }
 
 watch(
@@ -418,290 +414,354 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-.product-list-container {
-  max-width: 1200px;
-  margin: 0 auto;
-  padding: 24px 16px;
+.catalog {
+  padding-top: 28px;
+  padding-bottom: 8px;
 }
 
-.list-breadcrumb {
-  margin-bottom: 20px;
-  padding: 4px 0;
-}
-
-.list-layout {
+/* 页头 */
+.catalog-head {
   display: flex;
-  gap: 24px;
-}
-
-/* Sidebar */
-.filter-sidebar {
-  width: 270px;
-  flex-shrink: 0;
-}
-
-.filter-card {
-  background: #fff;
-  border-radius: 12px;
-  padding: 20px;
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.04);
-  border: 1px solid #f1f5f9;
-}
-
-.filter-card-header {
-  display: flex;
+  align-items: flex-end;
   justify-content: space-between;
-  align-items: center;
-  margin-bottom: 20px;
-  padding-bottom: 12px;
-  border-bottom: 1px solid #f1f5f9;
+  gap: 24px;
+  padding-top: 12px;
+  padding-bottom: 36px;
+  flex-wrap: wrap;
 }
 
-.filter-title {
-  font-size: 16px;
+.catalog-title {
+  margin-top: 12px;
+}
+
+.catalog-sub {
+  margin-top: 10px;
+  font-size: 13px;
+  color: var(--text-3);
+}
+
+.catalog-count {
+  color: var(--cyan);
+  font-size: 15px;
   font-weight: 700;
-  color: #1e293b;
+}
+
+.head-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.filter-toggle {
+  display: none;
+}
+
+/* 主体 */
+.catalog-body {
+  display: flex;
+  gap: 28px;
+  align-items: flex-start;
+}
+
+/* 侧栏 */
+.filter-rail {
+  width: 268px;
+  flex-shrink: 0;
+  position: sticky;
+  top: 96px;
+}
+
+.filter-panel {
+  padding: 22px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: rgba(255, 255, 255, 0.025);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+
+.filter-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding-bottom: 16px;
+  margin-bottom: 20px;
+  border-bottom: 1px solid var(--line);
+}
+
+.filter-head-label {
+  font-size: 10px;
+  letter-spacing: 0.24em;
+  color: var(--cyan);
+}
+
+.filter-head-hint {
+  font-size: 11px;
+  color: var(--text-4);
 }
 
 .filter-group {
-  margin-bottom: 20px;
+  margin-bottom: 22px;
+}
+
+.filter-group:last-child {
+  margin-bottom: 4px;
 }
 
 .filter-label {
   display: block;
-  font-size: 13px;
-  font-weight: 600;
-  color: #475569;
-  margin-bottom: 8px;
+  margin-bottom: 9px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-2);
+  letter-spacing: 0.02em;
 }
 
 .w-full {
   width: 100%;
 }
 
-.price-range-inputs {
+/* 自定义搜索框 */
+.search-field {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-bottom: 8px;
+  height: 38px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.045);
+  transition: all 0.25s var(--ease);
+}
+
+.search-field:focus-within {
+  border-color: rgba(124, 92, 255, 0.8);
+  box-shadow: 0 0 0 3px rgba(124, 92, 255, 0.14);
+}
+
+.search-icon {
+  color: var(--text-3);
+  font-size: 14px;
+}
+
+.field-input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--text);
+  font-family: var(--font-body);
+  font-size: 13px;
+}
+
+.field-input::placeholder {
+  color: var(--text-4);
+}
+
+.field-clear {
+  display: grid;
+  place-items: center;
+  border: none;
+  background: none;
+  color: var(--text-4);
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.field-clear:hover {
+  color: var(--text);
+}
+
+/* 价格 */
+.price-range {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
 }
 
 .price-input {
   flex: 1;
+  min-width: 0;
 }
 
-.range-divider {
-  color: #94a3b8;
+.price-input :deep(.el-input__wrapper) {
+  padding: 0 10px;
 }
 
-.apply-price-btn {
+.range-line {
+  width: 10px;
+  height: 1px;
+  background: var(--line-strong);
+  flex-shrink: 0;
+}
+
+.apply-btn {
   width: 100%;
 }
 
-/* Main Area */
-.list-main {
+/* 主区 */
+.catalog-main {
   flex: 1;
   min-width: 0;
 }
 
-.main-toolbar {
-  background: #fff;
-  border-radius: 12px;
-  padding: 16px 20px;
-  margin-bottom: 20px;
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.04);
-  border: 1px solid #f1f5f9;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 12px;
-}
-
-.toolbar-left {
+.toolbar {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 18px;
   flex-wrap: wrap;
+  margin-bottom: 22px;
+  padding-bottom: 18px;
+  border-bottom: 1px solid var(--line);
 }
 
-.result-count {
-  font-size: 14px;
-  color: #64748b;
+.sort-pills {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.03);
 }
 
-.result-count strong {
-  color: #1e293b;
-  font-size: 16px;
+.sort-pill {
+  padding: 7px 16px;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-3);
+  font-family: var(--font-body);
+  font-size: 12.5px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.3s var(--ease);
+  white-space: nowrap;
 }
 
-.active-tags {
+.sort-pill:hover {
+  color: var(--text);
+}
+
+.sort-pill.is-active {
+  background: var(--grad);
+  color: #07080d;
+  font-weight: 600;
+}
+
+.active-chips {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
 }
 
-.toolbar-right {
-  display: flex;
+.chip {
+  display: inline-flex;
   align-items: center;
-  gap: 10px;
-}
-
-.sort-label {
-  font-size: 13px;
-  color: #64748b;
-}
-
-/* Products Grid */
-.products-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 20px;
-}
-
-.catalog-product-card {
-  background: #fff;
-  border-radius: 12px;
-  overflow: hidden;
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.04);
-  border: 1px solid #f1f5f9;
-  transition: all 0.25s ease;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid rgba(124, 92, 255, 0.35);
+  border-radius: 999px;
+  background: rgba(124, 92, 255, 0.12);
+  color: #c9bfff;
+  font-family: var(--font-body);
+  font-size: 11.5px;
   cursor: pointer;
-  display: flex;
-  flex-direction: column;
+  transition: all 0.25s var(--ease);
 }
 
-.catalog-product-card:hover {
-  transform: translateY(-4px);
-  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.08);
-  border-color: #cbd5e1;
+.chip:hover {
+  border-color: rgba(255, 92, 122, 0.5);
+  color: #ff9db0;
+  background: rgba(255, 92, 122, 0.1);
 }
 
-.card-thumb-wrap {
+/* 商品网格 */
+.grid-wrap {
+  min-height: 320px;
+}
+
+.product-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 22px;
+}
+
+/* 空态 */
+.empty-state {
   position: relative;
-  width: 100%;
-  height: 240px;
-  background: #f8fafc;
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  padding: 90px 24px;
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius-xl);
+  text-align: center;
   overflow: hidden;
 }
 
-.card-img {
-  width: 100%;
-  height: 100%;
-  transition: transform 0.3s ease;
+.empty-orb {
+  width: 90px;
+  height: 90px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 40% 35%, rgba(124, 92, 255, 0.6), rgba(34, 211, 238, 0.12) 60%, transparent 72%);
+  filter: blur(6px);
+  margin-bottom: 6px;
 }
 
-.catalog-product-card:hover .card-img {
-  transform: scale(1.04);
-}
-
-.img-placeholder {
-  width: 100%;
-  height: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #94a3b8;
-  font-size: 13px;
-}
-
-.card-brand-badge {
-  position: absolute;
-  top: 10px;
-  left: 10px;
-  background: rgba(15, 23, 42, 0.75);
-  backdrop-filter: blur(4px);
-  color: #fff;
-  font-size: 11px;
+.empty-title {
+  font-size: 19px;
   font-weight: 600;
-  padding: 3px 8px;
-  border-radius: 4px;
 }
 
-.card-details {
-  padding: 16px;
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-}
-
-.card-cat-badge {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
+.empty-desc {
+  font-size: 13px;
+  color: var(--text-3);
   margin-bottom: 8px;
 }
 
-.stock-pill {
-  font-size: 12px;
-  color: #64748b;
-}
-
-.danger-stock {
-  color: #ef4444;
-  font-weight: 600;
-}
-
-.card-name {
-  font-size: 15px;
-  font-weight: 600;
-  color: #1e293b;
-  margin-bottom: 6px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.card-sub {
-  font-size: 12px;
-  color: #64748b;
-  margin-bottom: 14px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.card-footer {
-  margin-top: auto;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.price-container {
-  display: flex;
-  align-items: baseline;
-  gap: 4px;
-}
-
-.rmb {
-  font-size: 14px;
-  font-weight: 700;
-  color: #ef4444;
-}
-
-.main-price {
-  font-size: 20px;
-  font-weight: 800;
-  color: #ef4444;
-}
-
-.strike-price {
-  font-size: 12px;
-  color: #94a3b8;
-  text-decoration: line-through;
-  margin-left: 4px;
-}
-
 .pagination-bar {
-  margin-top: 32px;
   display: flex;
   justify-content: center;
+  margin-top: 44px;
 }
 
-.empty-wrap {
-  padding: 60px 0;
-  background: #fff;
-  border-radius: 12px;
+/* 响应式 */
+@media (max-width: 1080px) {
+  .product-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 900px) {
+  .filter-toggle {
+    display: inline-flex;
+  }
+
+  .catalog-body {
+    flex-direction: column;
+  }
+
+  .filter-rail {
+    width: 100%;
+    position: static;
+    display: none;
+  }
+
+  .filter-rail.is-open {
+    display: block;
+  }
+}
+
+@media (max-width: 600px) {
+  .product-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .sort-pills {
+    width: 100%;
+    overflow-x: auto;
+  }
 }
 </style>

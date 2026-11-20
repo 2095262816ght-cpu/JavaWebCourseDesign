@@ -18,6 +18,13 @@ public interface BrandService {
     List<BrandVO> getFeaturedBrands(int limit);
 
     /**
+     * 获取前台全部启用品牌列表（无数量上限，供筛选与目录展示，内置 Cache-Aside 缓存加速）
+     *
+     * @return 全量启用品牌列表
+     */
+    List<BrandVO> getPortalBrands();
+
+    /**
      * 分页多条件查询品牌列表
      *
      * @param query 查询参数

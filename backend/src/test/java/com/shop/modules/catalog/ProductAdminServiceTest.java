@@ -117,6 +117,22 @@ class ProductAdminServiceTest {
     }
 
     @Test
+    @DisplayName("测试管理后台按父分类筛选可命中子分类下商品")
+    void testListAdminProductsWithParentCategoryIncludesChildren() {
+        AdminProductQuery parentCategoryQuery = new AdminProductQuery(
+                null, null, 1L, null, 1, 20
+        );
+        PageResult<ProductAdminVO> result = productAdminService.listAdminProducts(parentCategoryQuery);
+        assertThat(result.total()).isGreaterThanOrEqualTo(1);
+        assertThat(result.records())
+                .extracting(ProductAdminVO::categoryId)
+                .anyMatch(cid -> cid != null && !cid.equals(1L));
+
+        PageResult<ProductAdminVO> defaultResult = productAdminService.listAdminProducts(null);
+        assertThat(defaultResult.current()).isEqualTo(1L);
+    }
+
+    @Test
     @DisplayName("测试商品删除")
     void testDeleteProduct() {
         ProductCommand cmd = new ProductCommand(

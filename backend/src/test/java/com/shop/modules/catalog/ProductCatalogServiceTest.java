@@ -5,8 +5,13 @@ import com.shop.modules.catalog.dto.HomeShowcaseVO;
 import com.shop.modules.catalog.dto.ProductCardVO;
 import com.shop.modules.catalog.dto.ProductDetailVO;
 import com.shop.modules.catalog.dto.ProductQueryCommand;
+import com.shop.modules.catalog.entity.ShopCategory;
+import com.shop.modules.catalog.entity.ShopProduct;
+import com.shop.modules.catalog.mapper.ShopCategoryMapper;
+import com.shop.modules.catalog.mapper.ShopProductMapper;
 import com.shop.modules.catalog.service.ProductCatalogService;
 import com.shop.modules.catalog.service.impl.ProductCatalogServiceImpl;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -15,6 +20,7 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -26,7 +32,22 @@ class ProductCatalogServiceTest {
     private ProductCatalogService catalogService;
 
     @Autowired
+    private ShopCategoryMapper categoryMapper;
+
+    @Autowired
+    private ShopProductMapper productMapper;
+
+    @Autowired
     private StringRedisTemplate redisTemplate;
+
+    @AfterEach
+    void cleanupCatalogRedisCache() {
+        Set<String> detailKeys = redisTemplate.keys(ProductCatalogServiceImpl.PRODUCT_DETAIL_CACHE_PREFIX + "*");
+        if (detailKeys != null && !detailKeys.isEmpty()) {
+            redisTemplate.delete(detailKeys);
+        }
+        redisTemplate.delete(ProductCatalogServiceImpl.HOME_SHOWCASE_CACHE_KEY);
+    }
 
     @Test
     @DisplayName("测试商城首页聚合橱窗获取与 Redis 缓存写入/命中")
@@ -107,5 +128,35 @@ class ProductCatalogServiceTest {
 
         // 验证详情缓存已被写入
         assertThat(redisTemplate.hasKey(ProductCatalogServiceImpl.PRODUCT_DETAIL_CACHE_PREFIX + 1L)).isTrue();
+    }
+
+    @Test
+    @DisplayName("测试三级及以上分类层次结构商品递归过滤")
+    void testSearchProductsAcrossDeepCategoryHierarchy() {
+        ShopCategory root = new ShopCategory(null, 0L, "深层测试一级", null, 99, 1);
+        categoryMapper.insert(root);
+        ShopCategory level2 = new ShopCategory(null, root.getId(), "深层测试二级", null, 1, 1);
+        categoryMapper.insert(level2);
+        ShopCategory level3 = new ShopCategory(null, level2.getId(), "深层测试三级", null, 1, 1);
+        categoryMapper.insert(level3);
+
+        ShopProduct deepProduct = new ShopProduct();
+        deepProduct.setBrandId(1L);
+        deepProduct.setCategoryId(level3.getId());
+        deepProduct.setName("三级分类专属测试设备");
+        deepProduct.setSubtitle("测试深层递归分类查询");
+        deepProduct.setMainImage("https://img.test/deep.jpg");
+        deepProduct.setPrice(new BigDecimal("199.00"));
+        deepProduct.setOriginalPrice(new BigDecimal("299.00"));
+        deepProduct.setStock(10);
+        deepProduct.setStatus(1);
+        productMapper.insert(deepProduct);
+
+        PageResult<ProductCardVO> result = catalogService.searchProducts(
+                new ProductQueryCommand(null, root.getId(), null, null, null, null, 1, 10)
+        );
+        assertThat(result.records())
+                .extracting(ProductCardVO::id)
+                .contains(deepProduct.getId());
     }
 }

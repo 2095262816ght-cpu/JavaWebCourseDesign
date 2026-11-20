@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <defs>
+    <linearGradient id="shopBg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#409EFF" />
+      <stop offset="100%" stop-color="#1D4ED8" />
+    </linearGradient>
+  </defs>
+  <rect x="2" y="2" width="60" height="60" rx="16" fill="url(#shopBg)" />
+  <path
+    d="M23 24 V19 A9 9 0 0 1 41 19 V24"
+    fill="none"
+    stroke="#FFFFFF"
+    stroke-width="4.5"
+    stroke-linecap="round"
+  />
+  <path
+    d="M17 24 H47 C48.7 24 50 25.3 50.2 27 L52 46 C52.4 50 49.3 53 45.3 53 H18.7 C14.7 53 11.6 50 12 46 L13.8 27 C14 25.3 15.3 24 17 24 Z"
+    fill="#FFFFFF"
+  />
+  <path
+    d="M24 34 Q32 42 40 34"
+    fill="none"
+    stroke="#2563EB"
+    stroke-width="4"
+    stroke-linecap="round"
+  />
+</svg>

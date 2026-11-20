@@ -34,7 +34,8 @@ services:
     volumes:
       - mysql_data:/var/lib/mysql
       - ../docs/sql/schema.sql:/docker-entrypoint-initdb.d/01_schema.sql:ro
-      - ../docs/sql/data.sql:/docker-entrypoint-initdb.d/02_data.sql:ro
+      # 生产环境刻意不挂载 data.sql：该文件含演示账号种子，直接初始化会写入可被猜到的默认口令。
+      # 首次部署后请按 README「管理员账号初始化」手动创建管理员账号。
     healthcheck:
       test: ["CMD-SHELL", "mysqladmin ping -h localhost -uroot -p$${MYSQL_ROOT_PASSWORD} || exit 1"]
       interval: 10s

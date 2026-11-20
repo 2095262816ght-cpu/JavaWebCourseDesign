@@ -38,6 +38,13 @@ export function getFeaturedBrandsApi(limit: number = 6): Promise<Brand[]> {
 }
 
 /**
+ * 前台获取全量启用品牌列表 (无数量截断，带 Redis 缓存)
+ */
+export function getPortalBrandsApi(): Promise<Brand[]> {
+  return get<Brand[]>('/api/portal/brands')
+}
+
+/**
  * 管理后台分页查询品牌列表
  */
 export function getAdminBrandsApi(params?: BrandQueryParams): Promise<PageResult<Brand>> {

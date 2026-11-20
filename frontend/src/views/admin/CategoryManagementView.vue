@@ -144,7 +144,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted, computed } from 'vue'
+import { ref, reactive, onMounted, computed, nextTick } from 'vue'
 import { Plus, Refresh, Edit, Delete, Menu } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
 import {
@@ -197,18 +197,23 @@ const cascaderOptions = computed(() => {
   const rootOption = {
     id: 0,
     name: '【顶级根分类】',
-    children: [] as CategoryNode[]
+    children: undefined as CategoryNode[] | undefined
   }
 
   // Remove current node from selectable parents when in edit mode to avoid cycles
   const filterChildren = (nodes: CategoryNode[]): any[] => {
     return nodes
       .filter((node) => node.id !== currentEditId.value)
-      .map((node) => ({
-        id: node.id,
-        name: node.name,
-        children: node.children && node.children.length > 0 ? filterChildren(node.children) : undefined
-      }))
+      .map((node) => {
+        const filteredChildren = node.children && node.children.length > 0
+          ? filterChildren(node.children)
+          : []
+        return {
+          id: node.id,
+          name: node.name,
+          children: filteredChildren.length > 0 ? filteredChildren : undefined
+        }
+      })
   }
 
   return [rootOption, ...filterChildren(categoryTree.value)]
@@ -220,6 +225,8 @@ const fetchCategories = async () => {
   try {
     const res = await getAdminCategoryTreeApi()
     categoryTree.value = res
+  } catch (err) {
+    console.error('加载分类树失败', err)
   } finally {
     loading.value = false
   }
@@ -236,6 +243,7 @@ const openCreateDialog = (parentId: number = 0) => {
   formData.sort = 1
   formData.status = 1
   dialogVisible.value = true
+  nextTick(() => formRef.value?.clearValidate())
 }
 
 const openEditDialog = (row: CategoryNode) => {
@@ -248,6 +256,7 @@ const openEditDialog = (row: CategoryNode) => {
   formData.sort = row.sort
   formData.status = row.status
   dialogVisible.value = true
+  nextTick(() => formRef.value?.clearValidate())
 }
 
 const submitForm = async () => {
@@ -273,6 +282,8 @@ const submitForm = async () => {
       }
       dialogVisible.value = false
       fetchCategories()
+    } catch {
+      // 错误提示由请求拦截器统一处理
     } finally {
       submitting.value = false
     }
@@ -327,23 +338,26 @@ onMounted(() => {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  background: #ffffff;
+  background: var(--glass-bg);
   padding: 20px 24px;
-  border-radius: 8px;
-  border: 1px solid #e5e7eb;
+  border-radius: 16px;
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--glass-shadow);
+  backdrop-filter: blur(var(--glass-blur)) saturate(165%);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(165%);
 }
 
 .page-title {
   margin: 0 0 6px 0;
   font-size: 20px;
   font-weight: 600;
-  color: #111827;
+  color: var(--text);
 }
 
 .page-desc {
   margin: 0;
   font-size: 13px;
-  color: #6b7280;
+  color: var(--text-3);
 }
 
 .header-actions {
@@ -353,7 +367,7 @@ onMounted(() => {
 
 .table-card {
   border-radius: 8px;
-  border: 1px solid #e5e7eb;
+  border: 1px solid var(--line);
 }
 
 .category-name-cell {
@@ -370,21 +384,21 @@ onMounted(() => {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  color: #4b5563;
+  color: var(--text-2);
 }
 
 .category-name-text {
   font-weight: 600;
-  color: #1f2937;
+  color: var(--text);
 }
 
 .text-muted {
-  color: #9ca3af;
+  color: var(--text-4);
 }
 
 .form-item-tip {
   margin-left: 12px;
   font-size: 12px;
-  color: #9ca3af;
+  color: var(--text-4);
 }
 </style>

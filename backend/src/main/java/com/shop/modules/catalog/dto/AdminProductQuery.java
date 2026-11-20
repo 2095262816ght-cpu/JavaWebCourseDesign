@@ -27,6 +27,9 @@ public record AdminProductQuery(
     }
 
     public int pageSizeOrDefault() {
-        return (pageSize == null || pageSize < 1 || pageSize > 100) ? 10 : pageSize;
+        if (pageSize == null || pageSize < 1) {
+            return 10;
+        }
+        return Math.min(pageSize, 100);
     }
 }

@@ -117,18 +117,36 @@ public interface ShopProductMapper extends BaseMapper<ShopProduct> {
 @Override
 @Transactional(rollbackFor = Exception.class)
 public OrderCheckoutResult checkout(Long customerId, CheckoutCommand cmd) {
-    // 1. 批量加载购物车勾选行与关联商品 (ProductBatchLookupHelper 消除 N+1 查询)
-    List<ShopCartItem> cartItems = cartItemMapper.selectCheckedItemsByCustomerId(customerId);
-    Map<Long, ShopProduct> productMap = productBatchLookupHelper.lookupAndValidate(cartItems);
+    // 1. 读取已勾选的购物车项，并用 ProductBatchLookupHelper 批量加载商品（消除 N+1 查询）
+    LambdaQueryWrapper<ShopCartItem> cartQuery = new LambdaQueryWrapper<>();
+    cartQuery.eq(ShopCartItem::getCustomerId, customerId)
+            .eq(ShopCartItem::getChecked, 1);
+    List<ShopCartItem> cartItems = cartItemMapper.selectList(cartQuery);
+
+    if (cartItems.isEmpty()) {
+        throw new BusinessException("购物车中暂无勾选的结算商品");
+    }
+
+    List<Long> productIds = cartItems.stream()
+            .map(ShopCartItem::getProductId)
+            .toList();
+    Map<Long, ShopProduct> productMap = productBatchLookupHelper.getProductMapByIds(productIds);
 
     BigDecimal totalAmount = BigDecimal.ZERO;
     for (ShopCartItem item : cartItems) {
         ShopProduct product = productMap.get(item.getProductId());
-        
+        if (product == null || Integer.valueOf(1).equals(product.getIsDeleted())
+                || !Integer.valueOf(1).equals(product.getStatus())) {
+            throw new BusinessException("商品 [" + item.getProductId() + "] 已下架或不存在");
+        }
+        if (product.getStock() == null || product.getStock() < item.getQuantity()) {
+            throw new BusinessException("商品 [" + product.getName() + "] 库存不足");
+        }
+
         // 单 SQL 原子条件扣减库存：InnoDB 行级排他锁由内核底层串行执行
         int affectedRows = productMapper.decrementStock(product.getId(), item.getQuantity());
         if (affectedRows == 0) {
-            // 受影响行数为 0 表示库存不足，立即抛出受检业务异常
+            // 受影响行数为 0 表示库存不足，立即抛出运行时业务异常（RuntimeException）
             // @Transactional 将自动回滚当前事务中的所有操作（包括已生成的订单记录和前置扣减）
             throw new BusinessException("商品 [" + product.getName() + "] 库存不足，扣减失败");
         }
@@ -141,7 +159,7 @@ public OrderCheckoutResult checkout(Long customerId, CheckoutCommand cmd) {
         totalAmount = totalAmount.add(lineSubtotal);
     }
 
-    // 3. 封装 DeliveryAddress 值对象并保存订单主表
+    // 2. 封装 DeliveryAddress 值对象并保存订单主表
     ShopOrder order = new ShopOrder();
     order.setOrderNo(generateOrderNo());
     order.setCustomerId(customerId);
@@ -150,7 +168,7 @@ public OrderCheckoutResult checkout(Long customerId, CheckoutCommand cmd) {
     order.setStatus("UNPAID");
     orderMapper.insert(order);
 
-    // 4. 生成订单项不可变价格与图片快照并保存
+    // 3. 生成订单项不可变价格与图片快照并保存
     for (ShopCartItem item : cartItems) {
         ShopProduct product = productMap.get(item.getProductId());
         ShopOrderItem orderItem = new ShopOrderItem();
@@ -165,7 +183,7 @@ public OrderCheckoutResult checkout(Long customerId, CheckoutCommand cmd) {
         orderItemMapper.insert(orderItem);
     }
 
-    // 5. 物理清空已勾选购物车条目
+    // 4. 物理清空已勾选购物车条目
     List<Long> checkedCartIds = cartItems.stream().map(ShopCartItem::getId).toList();
     cartItemMapper.deleteBatchIds(checkedCartIds);
 
@@ -176,8 +194,22 @@ public OrderCheckoutResult checkout(Long customerId, CheckoutCommand cmd) {
 ### 3.3 扣减库存与缓存双写一致性保障（Transactional Cache Eviction）
 
 在大流量秒杀场景中，除了数据库物理库存不能超卖，**缓存中的库存与详情展示也绝不能被污染**：
-- **即时失效**：单条商品库存一旦扣减成功，`evictProductDetailCache` 立即清除 Redis 中该商品的详情缓存（`catalog:product:detail:{id}`）与首页聚合橱窗（`catalog:product:showcase:home`）；
-- **事务提交后二次淘汰（`afterCommit`）**：在 Spring 事务管理器中注册 `TransactionSynchronization.afterCommit` 钩子。即使并发读线程在事务提交前从 MySQL 可重复读（RR）隔离快照中读取了旧数据并试图回写 Redis，在事务提交瞬间，该钩子会再度发起淘汰清理，彻底粉碎任何并发脏缓存。
+- **即时失效**：单条商品库存一旦扣减成功，`evictProductDetailCache` 立即清除 Redis 中该商品的详情缓存（`catalog:product:detail:{id}`）与首页聚合橱窗（`catalog:showcase:home`）；
+- **事务提交后二次淘汰（`afterCommit`）**：通过 [`TransactionalCacheEvictor.evictNowAndAfterCommit()`](file:///D:/JavaWeb/backend/src/main/java/com/shop/common/cache/TransactionalCacheEvictor.java) 在 Spring 事务管理器中注册 `TransactionSynchronization.afterCommit` 钩子。即使并发读线程在事务提交前从 MySQL 可重复读（RR）隔离快照中读取了旧数据并试图回写 Redis，在事务提交瞬间，该钩子会再度发起淘汰清理，彻底粉碎任何并发脏缓存。
+
+### 3.4 订单五态状态机并发控制与未发货取消原子回补闭环
+
+真实的商业库存安全不仅要管住“正向扣减不超卖”，还必须严防**“逆向取消多退库存”**与**“发货/取消并发状态冲突”**。本项目订单全生命周期定义为五种状态：`UNPAID → PAID → SHIPPED → COMPLETED`，且仅允许未发货订单（`UNPAID` / `PAID`）流转为 `CANCELLED`。
+
+在 [`OrderCheckoutServiceImpl.java`](file:///D:/JavaWeb/backend/src/main/java/com/shop/modules/commerce/service/impl/OrderCheckoutServiceImpl.java) 中，所有关键状态跃迁同样采用**单条带前置状态条件的原子更新 SQL** 抢占状态迁移权：
+
+1. **防并发重复退还库存（`cancelAndRestoreStock`）**：
+   - 若用户网络卡顿连点两次“取消订单”，或顾客与后台管理员在同一毫秒点击取消，如果仅靠 Java 内存里的 `if` 判断，两个并发事务可能同时通过校验并重复累加库存；
+   - 本项目先执行 `orderMapper.cancelUnshippedOrder(orderId)`（SQL 条件限定当前状态必须为 `UNPAID` 或 `PAID` 才更新为 `CANCELLED`）。InnoDB 行锁保证只有一个事务返回 `affectedRows = 1`，未抢到状态迁移权的请求立即报错回滚；
+   - **仅抢占成功的唯一事务**会遍历 `shop_order_item` 快照明细，调用 [`ShopProductMapper.incrementStock()`](file:///D:/JavaWeb/backend/src/main/java/com/shop/modules/catalog/mapper/ShopProductMapper.java) 原子归还对应商品库存，并同步触发商品详情与首页橱窗的双重缓存淘汰。
+2. **防支付与发货并发竞态（`pay` / `markShipped`）**：
+   - 支付时通过 `payUnpaidOrder` 条件抢占 `UNPAID → PAID` 迁移权，若并发重复点击支付则二次校验最新状态实现幂等成功，避免 `payment_time` 被重复覆盖；
+   - 后台发货时通过 `shipPaidOrder` 条件抢占 `PAID → SHIPPED` 迁移权，杜绝“管理员刚点发货、顾客同时取消订单导致货已发出但库存被退回”的极端竞态漏洞。
 
 ---
 

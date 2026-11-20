@@ -1,15 +1,141 @@
-version: '3.8'
+name: shop-trial
+
+# ========================================================
+# 试用机部署编排 (2 核 4G / 单机 / 仅 HTTP 80)
+# 与生产编排的区别：
+#   1. 对外只监听 80，TLS 由 Cloudflare 边缘终结，回源走明文 HTTP
+#   2. 全部使用预构建产物 (app.jar / dist)，服务器上不做编译
+#   3. 每个容器限制内存，防止 4G 机器 OOM
+# ========================================================
 
 services:
-  redis:
+  # ----------------------------------------
+  # 1. MySQL 8.4 (降低内存占用，仅内部网络)
+  # ----------------------------------------
+  shop-mysql:
+    image: mysql:8.4
+    container_name: shop-mysql
+    restart: always
+    mem_limit: 1400m
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:-Shop_Trial_2026!}
+      MYSQL_DATABASE: ${DB_NAME:-shop_db}
+      TZ: Asia/Shanghai
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --innodb-buffer-pool-size=256M
+      - --performance-schema=OFF
+      - --max-connections=150
+    volumes:
+      # 直接在本目录运行前，请先把 docs/sql/schema.sql 复制到 ./sql/，否则 Docker 会建出空目录导致初始化失败
+      - ./data/mysql:/var/lib/mysql
+      - ./sql/schema.sql:/docker-entrypoint-initdb.d/01_schema.sql:ro
+      # 刻意不挂载 data.sql：该文件含演示账号种子，重新初始化会写入可被猜到的默认口令。
+      # 首次部署后请按 README「管理员账号初始化」手动创建管理员账号。
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 45s
+    networks:
+      - shop
+
+  # ----------------------------------------
+  # 2. Redis 7.2 (限制最大内存，LRU 淘汰)
+  # ----------------------------------------
+  shop-redis:
     image: redis:7.2-alpine
     container_name: shop-redis
     restart: always
-    ports:
-      - "6379:6379"
-    command: redis-server --appendonly yes
+    mem_limit: 192m
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-Shop_Trial_Redis_2026!}
+    command:
+      - sh
+      - -c
+      - exec redis-server --requirepass "$$REDIS_PASSWORD" --appendonly yes --maxmemory 128mb --maxmemory-policy allkeys-lru
     volumes:
-      - redis_data:/data
+      - ./data/redis:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" ping | grep -q PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - shop
 
-volumes:
-  redis_data:
+  # ----------------------------------------
+  # 3. Spring Boot 后端 (直接运行本地构建好的 jar)
+  # ----------------------------------------
+  shop-backend:
+    image: eclipse-temurin:21-jre
+    container_name: shop-backend
+    restart: always
+    mem_limit: 1200m
+    environment:
+      SPRING_PROFILES_ACTIVE: prod
+      DB_HOST: shop-mysql
+      DB_PORT: 3306
+      DB_NAME: ${DB_NAME:-shop_db}
+      DB_USER: root
+      DB_PASSWORD: ${DB_ROOT_PASSWORD:-Shop_Trial_2026!}
+      REDIS_HOST: shop-redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-Shop_Trial_Redis_2026!}
+      TZ: Asia/Shanghai
+      # 限制堆内存，避免 4G 机器被 JVM 吃掉
+      JAVA_TOOL_OPTIONS: -Xms256m -Xmx768m -XX:+UseSerialGC -Duser.timezone=Asia/Shanghai -Dfile.encoding=UTF-8
+    command: ["java", "-jar", "/app/app.jar"]
+    volumes:
+      - ./app/app.jar:/app/app.jar:ro
+      - ./uploads:/app/uploads
+      - ./logs:/app/logs
+    depends_on:
+      shop-mysql:
+        condition: service_healthy
+      shop-redis:
+        condition: service_healthy
+    networks:
+      - shop
+
+  # ----------------------------------------
+  # 4. 前端静态托管 (挂载本地构建的 dist)
+  # ----------------------------------------
+  shop-frontend:
+    image: nginx:1.27-alpine
+    container_name: shop-frontend
+    restart: always
+    mem_limit: 64m
+    volumes:
+      - ./dist:/usr/share/nginx/html:ro
+      - ./nginx/frontend.conf:/etc/nginx/conf.d/default.conf:ro
+    networks:
+      - shop
+
+  # ----------------------------------------
+  # 5. 边缘网关 (对外端口：仅 80)
+  #    Cloudflare 负责 TLS 终结，回源到源站 80
+  # ----------------------------------------
+  shop-nginx:
+    image: nginx:1.27-alpine
+    container_name: shop-nginx
+    restart: always
+    mem_limit: 64m
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/shop.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./uploads:/usr/share/nginx/uploads:ro
+    depends_on:
+      - shop-backend
+      - shop-frontend
+    networks:
+      - shop
+
+networks:
+  shop:
+    driver: bridge
+    name: shop-trial-network

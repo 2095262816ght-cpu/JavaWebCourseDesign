@@ -37,8 +37,8 @@
 
 #### 📂 本项目源码佐证
 - Sa-Token JWT 配置：[`com.shop.config.SaTokenConfig`](file:///D:/JavaWeb/backend/src/main/java/com/shop/config/SaTokenConfig.java)
-- 路由防护拦截配置：`com.shop.config.WebMvcConfig`（第 55-75 行）
-- 自定义角色动态加载：`com.shop.config.StpInterfaceImpl`（第 29-42 行）
+- 路由防护拦截配置：`com.shop.config.WebMvcConfig` 的 `addInterceptors()` 方法
+- 自定义角色动态加载：`com.shop.config.StpInterfaceImpl`（`getRoleList()`）
 
 ---
 
@@ -62,7 +62,7 @@
 4. **集成测试验证**：我们编写了 `OrderConcurrencyTest`，使用 `CountDownLatch` 门闩并发模拟 10 个线程抢购仅 1 件库存，测试结果严格断言为 1 笔成功、9 笔被拦截报错、最终库存精准归 0。”
 
 #### 📂 本项目源码佐证
-- 原子 SQL 声明：`com.shop.modules.catalog.mapper.ShopProductMapper`（第 17-18 行）
+- 原子 SQL 声明：`com.shop.modules.catalog.mapper.ShopProductMapper.decrementStock()`（第 18-19 行）
 - 业务扣减、回滚与事务同步缓存淘汰：`com.shop.modules.commerce.service.impl.OrderCheckoutServiceImpl`（`checkout` 方法与 `evictProductDetailCache`）
 - 多线程高并发测试用例：`backend/src/test/java/com/shop/modules/commerce/OrderConcurrencyTest.java`（第 78-162 行）
 
@@ -104,7 +104,7 @@
    - **自适应工作因子（Cost Factor）**：故意设计为 CPU/内存密集型（默认迭代 1024 轮），单次哈希耗时约 50~100ms。这对正常登录用户完全无感知，但让黑客离线暴力破解的算力成本呈指数级剧增。”
 
 #### 📂 本项目源码佐证
-- 用户密码加盐与校验：`com.shop.modules.auth.service.impl.AuthServiceImpl`（注册：第 43 行；登录：第 66 行）
+- 用户密码加盐与校验：`com.shop.modules.auth.service.impl.AuthServiceImpl`（注册 `BCrypt.hashpw`：第 48 行；登录 `BCrypt.checkpw`：第 72 行）
 
 ---
 
@@ -135,18 +135,18 @@
 #### 💡 满分回答话术
 “老师，我们在商品陈列的高频读场景中（如首页推荐品牌、全部分类树以及品牌分页检索）深度实践了 **Cache-Aside 旁路缓存模式**：
 1. **Cache-Aside 模式与分区键策略**：
-   - **读操作**：先查 Redis，命中直接返回；未命中则查 MySQL，并写入 Redis 赋予 6 小时过期时间（TTL）；
-   - **防分页冲突的分区 Key 设计**：品牌默认首屏查询存入 `catalog:brand:all`，带特定分页或搜索条件的查询动态路由至 `catalog:brand:list:{page}:{size}:{kw}:{status}`，避免不同客户端的分页大小覆盖；
-   - **写操作主动淘汰**：后台修改或删除品牌/分类时，先更新 MySQL 数据库，随后**批量主动淘汰（DEL）**对应的缓存 Key。
+   - **读操作与分级 TTL**：先查 Redis，命中直接返回；未命中则查 MySQL 并按业务分级赋予过期时间（首页聚合橱窗 `15分钟`、商品详情 `30分钟`、品牌列表与推荐 `6小时`、全部分类树 `24小时`）；
+   - **防分页冲突的分区 Key 设计**：后台品牌默认首屏存入 `catalog:brand:all`，前台全量启用品牌存入 `catalog:brand:portal:all`，带特定分页或搜索条件的查询动态路由至 `catalog:brand:list:{page}:{size}:{kw}:{status}`，避免不同客户端的分页大小互相覆盖；
+   - **写操作主动淘汰**：后台修改或删除品牌/分类/商品时，先更新 MySQL 数据库，随后**批量主动淘汰（DEL）**对应的缓存 Key。
 2. **为什么‘淘汰缓存’优于‘更新缓存’？**：
    - 如果两个线程并发写，更新缓存可能会因线程调度乱序导致旧值覆盖新值产生永久脏数据；而直接淘汰缓存消除了并发覆盖风险，同时避免了无读请求时频繁更新缓存造成的计算资源浪费。
 3. **事务同步双重淘汰（TransactionSynchronization.afterCommit）**：
-   - 在下单扣减库存等写事务中，单纯在事务体内部淘汰缓存容易因并发读线程在事务提交前读到旧快照而将脏数据重新回写进 Redis。我们通过注册 Spring 的 `afterCommit` 事务同步钩子，确保在数据库事务真正 commit 后二次发起淘汰，彻底杜绝脏缓存回写。
-4. **容灾降级**：如果 Redis 服务暂时宕机，我们在 Service 内部捕获异常并降级直查 MySQL，绝不让缓存异常拖垮整个业务。”
+   - 在下单扣减库存等写事务中，单纯在事务体内部淘汰缓存容易因并发读线程在事务提交前读到旧快照而将脏数据重新回写进 Redis。我们封装了 `TransactionalCacheEvictor` 注册 Spring 的 `afterCommit` 事务同步钩子，确保在数据库事务真正 commit 后二次发起淘汰，彻底杜绝脏缓存回写。
+4. **容灾降级**：如果 Redis 服务暂时宕机，我们在 Service 内部捕获异常并平滑降级直查 MySQL，绝不让缓存异常拖垮整个业务。”
 
 #### 📂 本项目源码佐证
-- 读写生命周期、分区 Key 与主动淘汰：`com.shop.modules.catalog.service.impl.BrandServiceImpl`（`getFeaturedBrands`、`listBrands`、`evictBrandCaches`）
-- 事务提交后双重淘汰实现：`com.shop.modules.commerce.service.impl.OrderCheckoutServiceImpl`（`evictProductDetailCache`）
+- 读写生命周期、分区 Key 与主动淘汰：`com.shop.modules.catalog.service.impl.BrandServiceImpl`（`getFeaturedBrands`、`listBrands`、`evictBrandCache`）
+- 事务提交后双重淘汰执行器：[`TransactionalCacheEvictor.java`](file:///D:/JavaWeb/backend/src/main/java/com/shop/common/cache/TransactionalCacheEvictor.java) 及 `OrderCheckoutServiceImpl`（`evictProductDetailCache`）
 
 ---
 
@@ -156,13 +156,13 @@
 考察高并发架构中经典的缓存三大灾难及其工程级防御策略。
 
 #### 💡 满分回答话术
-“老师，这三者是高并发系统中最核心的防护点：
-1. **缓存穿透（查询压根不存在的数据）**：恶意用户伪造负数或随机 ID 反复请求。
-   - *防御*：我们在 Controller 层进行参数严格校验；在 Service 层即使数据库查不到也缓存空对象（Cache Null），设置短 TTL；超大系统可前置布隆过滤器（Bloom Filter）。
+“老师，这三者是高并发系统中最核心的缓存防护命题，我们在项目中结合业务体量做了务实落地与演进预案：
+1. **缓存穿透（查询压根不存在的数据）**：恶意用户伪造非法 ID 反复请求导致直击数据库。
+   - *本项目落地与演进*：我们在结算与购物车链路中通过 `ProductBatchLookupHelper` 先去重判空防无效查询，并在详情查询中快速拦截 `null` 或非法 ID；若演进至公网大流量秒杀场景，可在未命中时写入短 TTL 空值哨兵（Cache Null）或前置布隆过滤器（Bloom Filter）。
 2. **缓存击穿（单一爆款 Key 到期瞬间海量并发涌入）**：
-   - *防御*：对热点数据采用互斥锁（Mutex Lock / Redis SETNX）重建缓存，只允许一个线程回源数据库，其余线程等待；或设置热点数据物理永不过期、逻辑过期异步刷新。
-3. **缓存雪崩（海量 Key 同一时刻集中大面积过期失效）**：
-   - *防御*：为所有批量缓存的 TTL 追加随机抖动时间（例如 `TTL = 6小时 + Random(1~10分钟)`），打散失效时间窗口；搭建 Redis 哨兵或集群杜绝单点故障。”
+   - *本项目落地与演进*：首页橱窗与推荐品牌等热点接口体积小、单库索引查询在毫秒级，配合写操作即时淘汰平滑过渡；超高并发场景下可升级为基于 Redis `SETNX` 互斥锁单线程重建缓存，或采用热点数据逻辑过期异步刷新。
+3. **缓存雪崩（海量 Key 同一时刻集中大面积过期失效或缓存节点宕机）**：
+   - *本项目已落地防线*：第一，我们将不同业务域缓存按 **`15m` / `30m` / `6h` / `24h` 四档错峰分级设置 TTL**（超大规模批量预热时可在此基础上叠加随机抖动时间打散过期窗口）；第二，所有缓存读写均内置 `try-catch` 毫秒级超时容灾降级（`timeout: 300ms`），即使 Redis 故障也能无缝降级直查 MySQL 保障核心交易可用。”
 
 #### 📂 本项目源码佐证
 - 详见技术讲义：[04-redis-caching-patterns.md](file:///D:/JavaWeb/docs/principles/04-redis-caching-patterns.md) 第 3 节。
@@ -221,8 +221,8 @@
    - 此后即使原商品下架、降价或删除，历史订单中的数据仍然真实还原下单那一刻的历史原貌，充分保障了商业契约的严肃性与审计合规。”
 
 #### 📂 本项目源码佐证
-- 数据库表结构快照字段：`docs/sql/schema.sql`（`shop_order_item` 表，第 135-148 行）
-- 结算时写入不可变快照：`com.shop.modules.commerce.service.impl.OrderCheckoutServiceImpl`（第 117-129 行）
+- 数据库表结构快照字段：`docs/sql/schema.sql`（`shop_order_item` 表，第 136-149 行）
+- 结算时写入不可变快照：`com.shop.modules.commerce.service.impl.OrderCheckoutServiceImpl`（订单项快照循环，第 130-143 行）
 
 ---
 
@@ -261,9 +261,9 @@
    - 前端拦截主要为了提升用户交互体验，不能作为绝对安全屏障。后端在 `WebMvcConfig` 中配置了 `SaRouter.match("/api/admin/**", r -> StpUtil.checkRole("ROLE_ADMIN"))`，黑客即便绕过前端直接用 Postman 调用管理 API，依然会被 Sa-Token 判定 403 物理拦截；
 3. **前端自动化测试套件（Vitest + happy-dom）硬核证明**：
    - 我们编写了自动化测试套件 `frontend/test/router.spec.ts`，在轻量 DOM 仿真环境下真实模拟未登录访客、普通顾客、管理员三种身份分别跳转 `/admin` 路径，严格断言未登录重定向至 `/login`、顾客拦截跳转、管理员合法放行；
-   - 执行 `npm test` 即可在毫秒级内跑完全套 15 个测试断言，用绿色自动化测试用例向答辩老师硬核证明鉴权逻辑的安全与完备。”
+   - 执行 `npm test` 即可在毫秒级内跑完全套 19 个测试断言，用绿色自动化测试用例向答辩老师硬核证明鉴权逻辑的安全与完备。”
 
 #### 📂 本项目源码佐证
 - 前端路由守卫：`frontend/src/router/index.ts`（第 103-136 行）
 - 前端自动化测试用例：[`frontend/test/router.spec.ts`](file:///D:/JavaWeb/frontend/test/router.spec.ts)
-- 后端路由拦截：`com.shop.config.WebMvcConfig`（第 55-65 行）
+- 后端路由拦截：`com.shop.config.WebMvcConfig`（`addInterceptors()`，第 68-92 行）

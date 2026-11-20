@@ -21,6 +21,6 @@ public record BrandQuery(
     }
 
     public int getSizeOrDefault() {
-        return (size == null || size < 1) ? 10 : size;
+        return (size == null || size < 1) ? 10 : Math.min(size, 100);
     }
 }

@@ -98,6 +98,13 @@ public class SysUser implements Serializable {
         this.status = status;
     }
 
+    /**
+     * 账号是否处于启用状态（唯一判定入口，避免各处重复散落 status == 1 的魔法判断）
+     */
+    public boolean isActive() {
+        return status != null && status == 1;
+    }
+
     public Integer getIsDeleted() {
         return isDeleted;
     }

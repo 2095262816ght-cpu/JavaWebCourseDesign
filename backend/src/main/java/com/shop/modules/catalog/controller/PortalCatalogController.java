@@ -42,4 +42,11 @@ public class PortalCatalogController {
         List<BrandVO> brands = brandService.getFeaturedBrands(limit);
         return Result.success(brands);
     }
+
+    @Operation(summary = "获取全部启用品牌", description = "前台商品检索筛选：返回所有启用品牌（无截断，Redis 缓存加速）")
+    @GetMapping("/brands")
+    public Result<List<BrandVO>> getPortalBrands() {
+        List<BrandVO> brands = brandService.getPortalBrands();
+        return Result.success(brands);
+    }
 }

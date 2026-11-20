@@ -10,6 +10,7 @@ import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMock
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.UUID;
 
@@ -17,11 +18,13 @@ import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.is;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @SpringBootTest
 @AutoConfigureMockMvc
+@Transactional
 class AuthControllerTest {
 
     @Autowired
@@ -110,5 +113,33 @@ class AuthControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code", is(200)))
                 .andExpect(jsonPath("$.data.records").isArray());
+    }
+
+    @Test
+    @DisplayName("测试用户分页越界钳制 [1,100] 与非法状态值拦截")
+    void testUserPaginationClampingAndInvalidStatus() throws Exception {
+        LoginCommand adminCmd = new LoginCommand("admin", "admin123");
+        String responseStr = mockMvc.perform(post("/api/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(adminCmd)))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        String token = objectMapper.readTree(responseStr).path("data").path("tokenValue").asText();
+
+        mockMvc.perform(get("/api/admin/users")
+                        .header("satoken", token)
+                        .param("page", "0")
+                        .param("size", "999"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code", is(200)))
+                .andExpect(jsonPath("$.data.current", is(1)))
+                .andExpect(jsonPath("$.data.size", is(100)));
+
+        mockMvc.perform(put("/api/admin/users/2/status")
+                        .header("satoken", token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"status\":99}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code", is(400)));
     }
 }

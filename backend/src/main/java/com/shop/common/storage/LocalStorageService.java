@@ -1,6 +1,7 @@
 package com.shop.common.storage;
 
 import com.shop.common.exception.BusinessException;
+import com.shop.common.result.ResultCode;
 import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -17,12 +18,17 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
+import java.util.Locale;
+import java.util.Set;
 import java.util.UUID;
 
 @Service
 public class LocalStorageService implements StorageService {
 
     private static final Logger log = LoggerFactory.getLogger(LocalStorageService.class);
+    private static final Set<String> ALLOWED_IMAGE_EXTENSIONS = Set.of(
+            ".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".ico"
+    );
 
     private final StorageProperties properties;
     private Path rootLocation;
@@ -52,7 +58,12 @@ public class LocalStorageService implements StorageService {
         String extension = "";
         int dotIdx = originalFilename.lastIndexOf(".");
         if (dotIdx >= 0) {
-            extension = originalFilename.substring(dotIdx);
+            extension = originalFilename.substring(dotIdx).toLowerCase(Locale.ROOT);
+        }
+        String contentType = file.getContentType();
+        if (!ALLOWED_IMAGE_EXTENSIONS.contains(extension)
+                || (contentType != null && contentType.toLowerCase(Locale.ROOT).contains("svg"))) {
+            throw new BusinessException(ResultCode.BAD_REQUEST.getCode(), "不支持的文件类型，仅支持 JPG/PNG/GIF/WebP/BMP/ICO 图片格式");
         }
 
         String storedFilename = UUID.randomUUID().toString().replace("-", "") + extension;

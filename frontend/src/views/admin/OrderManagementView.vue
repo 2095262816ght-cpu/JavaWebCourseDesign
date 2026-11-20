@@ -6,7 +6,7 @@
         <span class="subtitle">全平台客户订单流转监控、快照归档与发货履约</span>
       </div>
       <div class="header-right">
-        <el-button :icon="Refresh" @click="handleReset">刷新列表</el-button>
+        <el-button :icon="Refresh" @click="fetchOrders">刷新列表</el-button>
       </div>
     </div>
 
@@ -75,7 +75,7 @@
 
         <el-table-column prop="totalAmount" label="订单金额" width="120" align="right">
           <template #default="{ row }">
-            <span class="amount-val">¥ {{ row.totalAmount.toFixed(2) }}</span>
+            <span class="amount-val">¥ {{ Number(row.totalAmount ?? 0).toFixed(2) }}</span>
           </template>
         </el-table-column>
 
@@ -90,15 +90,19 @@
 
         <el-table-column prop="status" label="状态" width="110" align="center">
           <template #default="{ row }">
-            <el-tag :type="getStatusTagType(row.status)">
-              {{ getStatusText(row.status) }}
+            <el-tag :type="getOrderStatusTagType(row.status)">
+              {{ getOrderStatusText(row.status) }}
             </el-tag>
           </template>
         </el-table-column>
 
-        <el-table-column prop="createdAt" label="下单时间" width="170" align="center" />
+        <el-table-column prop="createdAt" label="下单时间" width="170" align="center">
+          <template #default="{ row }">
+            <span>{{ formatDateTime(row.createdAt) }}</span>
+          </template>
+        </el-table-column>
 
-        <el-table-column label="操作" width="180" fixed="right" align="center">
+        <el-table-column label="操作" width="250" fixed="right" align="center">
           <template #default="{ row }">
             <el-button
               link
@@ -120,6 +124,18 @@
             >
               标记发货
             </el-button>
+
+            <el-divider direction="vertical" />
+
+            <el-button
+              link
+              type="danger"
+              size="small"
+              :disabled="row.status !== 'UNPAID' && row.status !== 'PAID'"
+              @click="handleCancelOrder(row)"
+            >
+              取消订单
+            </el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -133,7 +149,7 @@
           :page-sizes="[10, 20, 50]"
           layout="total, sizes, prev, pager, next, jumper"
           background
-          @size-change="fetchOrders"
+          @size-change="handleSizeChange"
           @current-change="fetchOrders"
         />
       </div>
@@ -150,13 +166,13 @@
         <el-descriptions title="基本信息" :column="1" border class="mb-4">
           <el-descriptions-item label="订单编号">{{ selectedOrder.orderNo }}</el-descriptions-item>
           <el-descriptions-item label="订单状态">
-            <el-tag :type="getStatusTagType(selectedOrder.status)">
-              {{ getStatusText(selectedOrder.status) }}
+            <el-tag :type="getOrderStatusTagType(selectedOrder.status)">
+              {{ getOrderStatusText(selectedOrder.status) }}
             </el-tag>
           </el-descriptions-item>
           <el-descriptions-item label="顾客ID">{{ selectedOrder.customerId || selectedOrder.userId }}</el-descriptions-item>
-          <el-descriptions-item label="创建时间">{{ selectedOrder.createdAt }}</el-descriptions-item>
-          <el-descriptions-item label="支付时间">{{ selectedOrder.paymentTime || '未支付' }}</el-descriptions-item>
+          <el-descriptions-item label="创建时间">{{ formatDateTime(selectedOrder.createdAt) }}</el-descriptions-item>
+          <el-descriptions-item label="支付时间">{{ selectedOrder.paymentTime ? formatDateTime(selectedOrder.paymentTime) : '未支付' }}</el-descriptions-item>
           <el-descriptions-item label="收件人姓名">{{ selectedOrder.deliveryAddress?.receiverName || selectedOrder.receiverName }}</el-descriptions-item>
           <el-descriptions-item label="收件人电话">{{ selectedOrder.deliveryAddress?.receiverPhone || selectedOrder.receiverPhone }}</el-descriptions-item>
           <el-descriptions-item label="收货详细地址">{{ selectedOrder.deliveryAddress?.receiverAddress || selectedOrder.receiverAddress }}</el-descriptions-item>
@@ -173,18 +189,18 @@
             <div class="snapshot-meta">
               <div class="snapshot-title">{{ item.productName }}</div>
               <div class="snapshot-calc">
-                ¥ {{ item.unitPrice.toFixed(2) }} × {{ item.quantity }} 件
+                ¥ {{ Number(item.unitPrice ?? 0).toFixed(2) }} × {{ item.quantity }} 件
               </div>
             </div>
             <div class="snapshot-total">
-              ¥ {{ item.totalPrice.toFixed(2) }}
+              ¥ {{ Number(item.totalPrice ?? 0).toFixed(2) }}
             </div>
           </div>
         </div>
 
         <div class="drawer-summary-bar">
           <span>实收订单总额：</span>
-          <strong class="drawer-total-amount">¥ {{ selectedOrder.totalAmount.toFixed(2) }}</strong>
+          <strong class="drawer-total-amount">¥ {{ Number(selectedOrder.totalAmount ?? 0).toFixed(2) }}</strong>
         </div>
 
         <div v-if="selectedOrder.status === 'PAID'" class="drawer-actions">
@@ -207,11 +223,14 @@ import {
 } from '@element-plus/icons-vue'
 import {
   getAdminOrdersApi,
+  getAdminOrderDetailApi,
   shipAdminOrderApi,
-  getOrderDetailApi,
+  cancelAdminOrderApi,
   type OrderSummary,
   type OrderDetail
 } from '@/api/order'
+import { formatDateTime } from '@/utils/format'
+import { getOrderStatusTagType, getOrderStatusText } from '@/utils/order'
 
 const loading = ref(false)
 const orders = ref<OrderSummary[]>([])
@@ -232,19 +251,32 @@ onMounted(() => {
   fetchOrders()
 })
 
+// 翻页、筛选与发货/取消后的刷新可能并发，只采纳最后一次请求的响应
+let orderRequestSeq = 0
+
 async function fetchOrders() {
+  const seq = ++orderRequestSeq
   loading.value = true
   try {
     const res = await getAdminOrdersApi(queryForm)
+    if (seq !== orderRequestSeq) return
     if (res) {
       orders.value = res.records || []
       total.value = res.total || 0
     }
   } catch (err: any) {
-    ElMessage.error(err.message || '获取订单列表失败')
+    console.error('获取订单列表失败', err)
   } finally {
-    loading.value = false
+    if (seq === orderRequestSeq) {
+      loading.value = false
+    }
   }
+}
+
+function handleSizeChange(size: number) {
+  queryForm.pageSize = size
+  queryForm.pageNum = 1
+  fetchOrders()
 }
 
 function handleSearch() {
@@ -260,47 +292,13 @@ function handleReset() {
   fetchOrders()
 }
 
-function getStatusTagType(status: string) {
-  switch (status) {
-    case 'UNPAID':
-      return 'warning'
-    case 'PAID':
-      return 'success'
-    case 'SHIPPED':
-      return 'primary'
-    case 'COMPLETED':
-      return 'info'
-    case 'CANCELLED':
-      return 'danger'
-    default:
-      return 'info'
-  }
-}
-
-function getStatusText(status: string) {
-  switch (status) {
-    case 'UNPAID':
-      return '待付款'
-    case 'PAID':
-      return '已付款'
-    case 'SHIPPED':
-      return '已发货'
-    case 'COMPLETED':
-      return '已完成'
-    case 'CANCELLED':
-      return '已取消'
-    default:
-      return status
-  }
-}
-
 async function openOrderDetail(order: OrderSummary) {
   try {
-    const detail = await getOrderDetailApi(order.id)
+    const detail = await getAdminOrderDetailApi(order.id)
     selectedOrder.value = detail
     drawerVisible.value = true
   } catch (err: any) {
-    ElMessage.error(err.message || '获取订单详情失败')
+    console.error('获取订单详情失败', err)
   }
 }
 
@@ -322,7 +320,30 @@ function handleShipOrder(order: OrderSummary | OrderDetail) {
       }
       await fetchOrders()
     } catch (err: any) {
-      ElMessage.error(err.message || '发货操作失败')
+      console.error('发货操作失败', err)
+    }
+  }).catch(() => {})
+}
+
+function handleCancelOrder(order: OrderSummary | OrderDetail) {
+  ElMessageBox.confirm(
+    `确定要取消订单【${order.orderNo}】吗？取消后商品库存将自动归还，且不可恢复。`,
+    '取消订单确认',
+    {
+      confirmButtonText: '确定取消',
+      cancelButtonText: '再想想',
+      type: 'warning'
+    }
+  ).then(async () => {
+    try {
+      await cancelAdminOrderApi(order.id)
+      ElMessage.success('订单已取消，库存已归还')
+      if (drawerVisible.value && selectedOrder.value?.id === order.id) {
+        selectedOrder.value.status = 'CANCELLED'
+      }
+      await fetchOrders()
+    } catch (err: any) {
+      console.error('取消订单失败', err)
     }
   }).catch(() => {})
 }
@@ -344,19 +365,20 @@ function handleShipOrder(order: OrderSummary | OrderDetail) {
 .header-left h2 {
   font-size: 20px;
   font-weight: 700;
-  color: #111827;
+  color: var(--text);
   margin: 0;
 }
 
 .subtitle {
   font-size: 13px;
-  color: #6b7280;
+  color: var(--text-3);
   margin-top: 4px;
   display: block;
 }
 
 .filter-card {
-  border-radius: 8px;
+  border-radius: 16px;
+  border: 1px solid var(--glass-border);
 }
 
 .filter-form {
@@ -364,19 +386,20 @@ function handleShipOrder(order: OrderSummary | OrderDetail) {
 }
 
 .table-card {
-  border-radius: 8px;
+  border-radius: 16px;
+  border: 1px solid var(--glass-border);
 }
 
 .mono-order-no {
   font-family: monospace;
   font-size: 13px;
   font-weight: 600;
-  color: #1f2937;
+  color: var(--text);
 }
 
 .amount-val {
   font-weight: 700;
-  color: #dc2626;
+  color: var(--price);
   font-size: 14px;
 }
 
@@ -386,7 +409,7 @@ function handleShipOrder(order: OrderSummary | OrderDetail) {
 }
 
 .address-sub {
-  color: #6b7280;
+  color: var(--text-3);
   font-size: 12px;
   white-space: nowrap;
   overflow: hidden;
@@ -410,7 +433,7 @@ function handleShipOrder(order: OrderSummary | OrderDetail) {
 .drawer-section-title {
   font-size: 15px;
   font-weight: 600;
-  color: #111827;
+  color: var(--text);
   margin: 8px 0 0;
 }
 
@@ -424,7 +447,7 @@ function handleShipOrder(order: OrderSummary | OrderDetail) {
   display: flex;
   align-items: center;
   gap: 12px;
-  background-color: #f9fafb;
+  background-color: rgba(255, 255, 255, 0.04);
   border-radius: 8px;
   padding: 10px 14px;
 }
@@ -433,7 +456,7 @@ function handleShipOrder(order: OrderSummary | OrderDetail) {
   width: 50px;
   height: 50px;
   border-radius: 6px;
-  border: 1px solid #e5e7eb;
+  border: 1px solid var(--line);
   flex-shrink: 0;
 }
 
@@ -445,7 +468,7 @@ function handleShipOrder(order: OrderSummary | OrderDetail) {
 .snapshot-title {
   font-size: 13px;
   font-weight: 600;
-  color: #1f2937;
+  color: var(--text);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -453,32 +476,32 @@ function handleShipOrder(order: OrderSummary | OrderDetail) {
 
 .snapshot-calc {
   font-size: 12px;
-  color: #6b7280;
+  color: var(--text-3);
   margin-top: 2px;
 }
 
 .snapshot-total {
   font-size: 14px;
   font-weight: 700;
-  color: #dc2626;
+  color: var(--price);
 }
 
 .drawer-summary-bar {
   display: flex;
   justify-content: flex-end;
   align-items: baseline;
-  background-color: #fef2f2;
-  border: 1px solid #fee2e2;
+  background-color: rgba(255, 92, 122, 0.07);
+  border: 1px solid rgba(255, 92, 122, 0.25);
   border-radius: 8px;
   padding: 12px 16px;
   font-size: 14px;
-  color: #991b1b;
+  color: #ff9db0;
 }
 
 .drawer-total-amount {
   font-size: 22px;
   font-weight: 800;
-  color: #dc2626;
+  color: var(--price);
   margin-left: 6px;
 }
 

@@ -47,12 +47,12 @@ sequenceDiagram
 
 ### 1.2 缓存逻辑内聚于深模块：调用方完全无感
 
-在本项目中，Controller 层（如 `CatalogController`）只需要注入 `BrandService`，调用 `brandService.getFeaturedBrands(limit)` 即可。
+在本项目中，Controller 层（如 `PortalCatalogController`）只需要注入 `BrandService`，调用 `brandService.getFeaturedBrands(limit)` 即可。
 - **信息隐藏（Information Hiding）**：Controller 根本不需要知道系统是否存在 Redis，不需要关心 key 的构造规则，更不需要处理 Redis 序列化与反序列化。
 - **容灾降级（Graceful Degradation）**：如果 Redis 中间件宕机或网络中断，深模块内部会捕获异常并记录 Warn 日志，自动平滑降级为直查 MySQL，绝不会让底层缓存异常导致前端接口直接报错 500。
 
 ```java
-// BrandServiceImpl.java 中的防击穿与容灾降级封装
+// BrandServiceImpl.java 中的 Cache-Aside 读写与容灾降级封装
 @Override
 public List<BrandVO> getFeaturedBrands(int limit) {
     int safeLimit = limit <= 0 ? 6 : Math.min(limit, 50);
@@ -99,10 +99,20 @@ public List<BrandVO> getFeaturedBrands(int limit) {
    ```
 3. **分层全量主动淘汰**：当管理员执行品牌新增、编辑、删除操作时，深模块内部一键清理全量关联键：
    ```java
-   private void evictBrandCaches() {
-       redisTemplate.delete(BRAND_ALL_CACHE_KEY);
-       evictKeysByPattern(BRAND_LIST_CACHE_PREFIX + "*");
-       evictKeysByPattern(BRAND_FEATURED_CACHE_PREFIX + "*");
+   private void evictBrandCache() {
+       TransactionalCacheEvictor.evictNowAndAfterCommit(this::doEvictBrandCache);
+   }
+
+   private void doEvictBrandCache() {
+       Set<String> keys = redisTemplate.keys("catalog:brand:*");
+       if (keys != null && !keys.isEmpty()) {
+           redisTemplate.delete(keys);
+       }
+       redisTemplate.delete(ProductCatalogServiceImpl.HOME_SHOWCASE_CACHE_KEY);
+       Set<String> detailKeys = redisTemplate.keys(ProductCatalogServiceImpl.PRODUCT_DETAIL_CACHE_PREFIX + "*");
+       if (detailKeys != null && !detailKeys.isEmpty()) {
+           redisTemplate.delete(detailKeys);
+       }
    }
    ```
 
@@ -138,7 +148,7 @@ public List<BrandVO> getFeaturedBrands(int limit) {
 sequenceDiagram
     autonumber
     participant Trx as 事务写线程 A (checkout)
-    participant Reader as 并发读线程 B (getDetail)
+    participant Reader as 并发读线程 B (getProductDetail)
     participant DB as MySQL (可重复读 RR 隔离)
     participant Redis as Redis 缓存
 
@@ -149,31 +159,36 @@ sequenceDiagram
     Reader->>DB: SELECT * FROM shop_product WHERE id = 1
     Note over Reader,DB: 由于线程 A 事务尚未 COMMIT, MySQL RR 隔离使线程 B 只能读到未扣减前的旧快照！
     DB-->>Reader: 返回旧库存数据 (如 stock = 100)
-    Reader->>Redis: SETEX catalog:product:detail:1 21600 旧库存(100) (脏数据回写！)
+    Reader->>Redis: SETEX catalog:product:detail:1 1800 旧库存(100) (脏数据回写！)
     Trx->>DB: COMMIT 事务正式持久化提交
     Note over DB,Redis: 最终灾难：DB 真实库存已扣为 99，但 Redis 中被回写了陈旧脏数据 100！
 ```
 
-#### 2. 本项目解决方案：`TransactionSynchronizationManager.afterCommit` 双重淘汰
-针对上述并发竞态，本项目在 `OrderCheckoutServiceImpl` 中实现了**即时淘汰 + 事务提交后二次淘汰**的防御闭环：
+#### 2. 本项目解决方案：`TransactionalCacheEvictor`（`afterCommit` 双重淘汰）
+针对上述并发竞态，本项目抽取了公共执行器 [`TransactionalCacheEvictor`](file:///D:/JavaWeb/backend/src/main/java/com/shop/common/cache/TransactionalCacheEvictor.java)，在 `OrderCheckoutServiceImpl` 与各目录写服务中统一实现**即时淘汰 + 事务提交后二次淘汰**的防御闭环：
 
 ```java
-private void evictProductDetailCache(Long productId) {
-    if (productId == null || redisTemplate == null) {
-        return;
-    }
+// TransactionalCacheEvictor.java —— 统一消除重复的事务同步脚手架
+public static void evictNowAndAfterCommit(Runnable eviction) {
     // 1. 事务内即时淘汰：避免当前线程后续逻辑或非事务读读取到旧缓存
-    doEvictProductDetailCache(productId);
-
+    eviction.run();
     // 2. 注册 Spring 事务同步钩子：当且仅当 MySQL 事务完全 commit 之后触发二次淘汰
     if (TransactionSynchronizationManager.isSynchronizationActive()) {
         TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
             @Override
             public void afterCommit() {
-                doEvictProductDetailCache(productId);
+                eviction.run();
             }
         });
     }
+}
+
+// OrderCheckoutServiceImpl.java 中的委托调用
+private void evictProductDetailCache(Long productId) {
+    if (productId == null || redisTemplate == null) {
+        return;
+    }
+    TransactionalCacheEvictor.evictNowAndAfterCommit(() -> doEvictProductDetailCache(productId));
 }
 
 private void doEvictProductDetailCache(Long productId) {

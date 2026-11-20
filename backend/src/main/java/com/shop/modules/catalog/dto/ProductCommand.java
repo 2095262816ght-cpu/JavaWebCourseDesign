@@ -2,6 +2,7 @@ package com.shop.modules.catalog.dto;
 
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.DecimalMin;
+import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
@@ -52,6 +53,8 @@ public record ProductCommand(
         @Schema(description = "库存", example = "50")
         Integer stock,
 
+        @Min(value = 0, message = "状态值只能为 0 或 1")
+        @Max(value = 1, message = "状态值只能为 0 或 1")
         @Schema(description = "上下架状态 (1: 上架, 0: 下架)", example = "1")
         Integer status,
 

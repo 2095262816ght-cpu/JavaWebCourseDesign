@@ -1,113 +1,126 @@
 <template>
-  <div class="orders-container">
-    <div class="orders-header">
-      <div class="title-wrap">
-        <el-icon class="title-icon"><List /></el-icon>
-        <h2>我的订单</h2>
+  <div class="orders-page page-container">
+    <!-- 页头 -->
+    <header class="orders-head">
+      <div>
+        <span class="eyebrow">ORDER HISTORY</span>
+        <h1 class="display-lg orders-title">我的订单</h1>
+        <p class="orders-sub">
+          共 <span class="mono accent">{{ total }}</span> 笔订单记录
+        </p>
       </div>
-      <el-button link type="primary" @click="$router.push('/products')">
-        <el-icon><ArrowLeft /></el-icon> 返回商城浏览
-      </el-button>
+      <button class="btn btn--ghost btn--sm" type="button" @click="$router.push('/products')">
+        <el-icon><ArrowLeft /></el-icon>
+        返回商城
+      </button>
+    </header>
+
+    <!-- 状态筛选 -->
+    <div class="status-tabs">
+      <button
+        v-for="tab in statusTabs"
+        :key="tab.value"
+        type="button"
+        class="status-tab"
+        :class="{ 'is-active': activeStatus === tab.value }"
+        @click="changeStatus(tab.value)"
+      >
+        {{ tab.label }}
+      </button>
     </div>
 
-    <!-- Status Tabs -->
-    <el-tabs v-model="activeStatus" class="orders-tabs" @tab-change="handleStatusChange">
-      <el-tab-pane label="全部订单" name="" />
-      <el-tab-pane label="待付款" name="UNPAID" />
-      <el-tab-pane label="已支付" name="PAID" />
-      <el-tab-pane label="已发货" name="SHIPPED" />
-    </el-tabs>
+    <!-- 内容 -->
+    <div v-loading="loading" class="orders-body">
+      <div v-if="orders.length === 0 && !loading" class="orders-empty">
+        <span class="empty-orb"></span>
+        <h2 class="empty-title">暂无订单记录</h2>
+        <p class="empty-desc">挑选商品并完成结算后，订单会出现在这里</p>
+        <button class="btn btn--primary btn--sm" type="button" @click="$router.push('/products')">
+          去挑选商品
+        </button>
+      </div>
 
-    <!-- Orders Content -->
-    <div v-loading="loading" class="orders-content">
-      <!-- Empty State -->
-      <el-card v-if="orders.length === 0" shadow="never" class="empty-card">
-        <el-empty description="暂无符合条件的订单记录">
-          <el-button type="primary" round @click="$router.push('/products')">
-            去挑选商品下单
-          </el-button>
-        </el-empty>
-      </el-card>
-
-      <!-- Order Cards -->
-      <div v-else class="order-card-list">
-        <div v-for="order in orders" :key="order.id" class="order-card">
-          <!-- Card Header -->
-          <div class="card-header">
-            <div class="header-left">
-              <span class="order-no-label">订单编号：</span>
-              <span class="order-no-val">{{ order.orderNo }}</span>
-              <span class="header-time">{{ order.createdAt }}</span>
+      <template v-else>
+        <article v-for="order in orders" :key="order.id" class="order-card" v-reveal>
+          <!-- 卡片头 -->
+          <header class="order-head">
+            <div class="order-head-left">
+              <span class="order-no mono">{{ order.orderNo }}</span>
+              <span class="order-time">{{ formatDateTime(order.createdAt) }}</span>
             </div>
-            <div class="header-right">
-              <el-tag :type="getStatusTagType(order.status)" effect="light" size="default">
-                {{ getStatusText(order.status) }}
-              </el-tag>
-            </div>
-          </div>
+            <span class="status-chip" :class="statusClass(order.status)">
+              {{ getOrderStatusText(order.status) }}
+            </span>
+          </header>
 
-          <!-- Card Body: Item Snapshot List -->
-          <div class="card-items">
-            <div
-              v-for="item in order.items"
-              :key="item.id"
-              class="order-item-row"
-            >
-              <el-image
-                :src="item.productImage"
-                class="item-img"
-                fit="cover"
-              />
+          <!-- 商品行 -->
+          <div class="order-items">
+            <div v-for="item in order.items" :key="item.id" class="order-item">
+              <el-image :src="item.productImage" class="item-img" fit="cover">
+                <template #error>
+                  <span class="item-fallback"><el-icon><Picture /></el-icon></span>
+                </template>
+              </el-image>
               <div class="item-info">
-                <div class="item-title">{{ item.productName }}</div>
-                <div class="item-price-meta">
-                  ¥ {{ item.unitPrice.toFixed(2) }} × {{ item.quantity }} 件
-                </div>
+                <p class="item-title">{{ item.productName }}</p>
+                <p class="item-meta mono">
+                  ¥{{ Number(item.unitPrice ?? 0).toFixed(2) }} × {{ item.quantity }}
+                </p>
               </div>
-              <div class="item-subtotal">
-                ¥ {{ item.totalPrice.toFixed(2) }}
-              </div>
+              <span class="item-subtotal mono">¥{{ Number(item.totalPrice ?? 0).toFixed(2) }}</span>
             </div>
           </div>
 
-          <!-- Card Footer -->
-          <div class="card-footer">
-            <div class="shipping-info">
+          <!-- 卡片脚 -->
+          <footer class="order-foot">
+            <p class="ship-info">
               <el-icon><Location /></el-icon>
-              <span>{{ order.receiverName }}（{{ order.receiverPhone }}）{{ order.receiverAddress }}</span>
-            </div>
+              <span>{{ order.receiverName }} · {{ order.receiverPhone }} · {{ order.receiverAddress }}</span>
+            </p>
 
-            <div class="footer-actions">
+            <div class="foot-right">
               <div class="order-total">
-                <span class="total-label">共 {{ order.itemCount }} 件商品，实付：</span>
-                <span class="currency">¥</span>
-                <span class="amount">{{ order.totalAmount.toFixed(2) }}</span>
+                <span class="total-label">{{ order.itemCount }} 件商品 · 实付</span>
+                <span class="price">
+                  <span class="symbol">¥</span>
+                  <span class="amount">{{ Number(order.totalAmount ?? 0).toFixed(2) }}</span>
+                </span>
               </div>
 
               <div class="btn-group">
-                <el-button
+                <button
                   v-if="order.status === 'UNPAID'"
-                  type="danger"
-                  size="default"
+                  class="btn btn--primary btn--sm"
+                  type="button"
                   @click="openPayModal(order)"
                 >
                   立即支付
-                </el-button>
-
-                <el-button
-                  type="default"
-                  size="default"
-                  @click="openDetailModal(order.id)"
+                </button>
+                <button
+                  v-if="order.status === 'SHIPPED'"
+                  class="btn btn--primary btn--sm"
+                  type="button"
+                  @click="handleConfirmReceipt(order)"
                 >
+                  确认收货
+                </button>
+                <button
+                  v-if="order.status === 'UNPAID' || order.status === 'PAID'"
+                  class="btn btn--ghost btn--sm"
+                  type="button"
+                  @click="handleCancelOrder(order)"
+                >
+                  取消订单
+                </button>
+                <button class="btn btn--ghost btn--sm" type="button" @click="openDetailModal(order.id)">
                   订单详情
-                </el-button>
+                </button>
               </div>
             </div>
-          </div>
-        </div>
+          </footer>
+        </article>
 
-        <!-- Pagination -->
-        <div class="pagination-wrapper">
+        <div class="pagination-bar">
           <el-pagination
             v-model:current-page="pageNum"
             v-model:page-size="pageSize"
@@ -115,96 +128,104 @@
             :page-sizes="[5, 10, 20]"
             layout="total, sizes, prev, pager, next"
             background
-            @size-change="fetchOrders"
+            @size-change="handleSizeChange"
             @current-change="fetchOrders"
           />
         </div>
-      </div>
+      </template>
     </div>
 
-    <!-- Order Detail Drawer / Dialog -->
-    <el-dialog
-      v-model="detailVisible"
-      title="订单详情快照"
-      width="640px"
-      destroy-on-close
-    >
-      <div v-if="currentDetail" class="detail-dialog-body">
-        <el-descriptions :column="2" border class="mb-4">
-          <el-descriptions-item label="订单编号">{{ currentDetail.orderNo }}</el-descriptions-item>
-          <el-descriptions-item label="当前状态">
-            <el-tag :type="getStatusTagType(currentDetail.status)">
-              {{ getStatusText(currentDetail.status) }}
-            </el-tag>
-          </el-descriptions-item>
-          <el-descriptions-item label="下单时间">{{ currentDetail.createdAt }}</el-descriptions-item>
-          <el-descriptions-item label="支付时间">{{ currentDetail.paymentTime || '尚未支付' }}</el-descriptions-item>
-          <el-descriptions-item label="收件人" :span="2">
-            {{ currentDetail.receiverName }}（{{ currentDetail.receiverPhone }}）
-          </el-descriptions-item>
-          <el-descriptions-item label="配送地址" :span="2">
-            {{ currentDetail.receiverAddress }}
-          </el-descriptions-item>
-        </el-descriptions>
+    <!-- 订单详情 -->
+    <el-dialog v-model="detailVisible" title="订单详情快照" width="680px" destroy-on-close>
+      <div v-if="currentDetail" class="detail-body">
+        <div class="detail-grid">
+          <div class="detail-cell">
+            <span class="cell-label">订单编号</span>
+            <span class="cell-value mono">{{ currentDetail.orderNo }}</span>
+          </div>
+          <div class="detail-cell">
+            <span class="cell-label">当前状态</span>
+            <span class="status-chip" :class="statusClass(currentDetail.status)">
+              {{ getOrderStatusText(currentDetail.status) }}
+            </span>
+          </div>
+          <div class="detail-cell">
+            <span class="cell-label">下单时间</span>
+            <span class="cell-value">{{ formatDateTime(currentDetail.createdAt) }}</span>
+          </div>
+          <div class="detail-cell">
+            <span class="cell-label">支付时间</span>
+            <span class="cell-value">
+              {{ currentDetail.paymentTime ? formatDateTime(currentDetail.paymentTime) : '尚未支付' }}
+            </span>
+          </div>
+          <div class="detail-cell is-wide">
+            <span class="cell-label">收件信息</span>
+            <span class="cell-value">
+              {{ currentDetail.receiverName }} · {{ currentDetail.receiverPhone }}
+            </span>
+          </div>
+          <div class="detail-cell is-wide">
+            <span class="cell-label">配送地址</span>
+            <span class="cell-value">{{ currentDetail.receiverAddress }}</span>
+          </div>
+        </div>
 
-        <div class="detail-items-title">购买商品行项（历史价格快照归档）</div>
-        <el-table :data="currentDetail.items" border style="width: 100%">
-          <el-table-column label="商品图" width="70">
-            <template #default="{ row }">
-              <el-image :src="row.productImage" style="width: 44px; height: 44px; border-radius: 4px;" fit="cover" />
-            </template>
-          </el-table-column>
-          <el-table-column prop="productName" label="商品名称" min-width="160" />
-          <el-table-column prop="unitPrice" label="购买单价" width="110">
-            <template #default="{ row }">¥ {{ row.unitPrice.toFixed(2) }}</template>
-          </el-table-column>
-          <el-table-column prop="quantity" label="数量" width="80" align="center" />
-          <el-table-column prop="totalPrice" label="小计" width="110" align="right">
-            <template #default="{ row }">
-              <strong style="color: #dc2626;">¥ {{ row.totalPrice.toFixed(2) }}</strong>
-            </template>
-          </el-table-column>
-        </el-table>
+        <p class="detail-label mono">ITEM SNAPSHOTS</p>
+        <div class="detail-items">
+          <div v-for="row in currentDetail.items" :key="row.id" class="detail-item">
+            <el-image :src="row.productImage" class="detail-img" fit="cover" />
+            <div class="detail-item-info">
+              <p class="detail-item-name">{{ row.productName }}</p>
+              <p class="detail-item-meta mono">
+                ¥{{ Number(row.unitPrice ?? 0).toFixed(2) }} × {{ row.quantity }}
+              </p>
+            </div>
+            <span class="detail-item-price mono">¥{{ Number(row.totalPrice ?? 0).toFixed(2) }}</span>
+          </div>
+        </div>
 
-        <div class="detail-total-box">
-          <span>订单总金额：</span>
-          <strong class="total-money">¥ {{ currentDetail.totalAmount.toFixed(2) }}</strong>
+        <div class="detail-total">
+          <span>订单总金额</span>
+          <span class="price">
+            <span class="symbol">¥</span>
+            <span class="amount">{{ Number(currentDetail.totalAmount ?? 0).toFixed(2) }}</span>
+          </span>
         </div>
       </div>
     </el-dialog>
 
-    <!-- Simulated Payment Dialog -->
+    <!-- 支付 -->
     <el-dialog
       v-model="payVisible"
-      title="订单收银台 · 模拟在线支付"
+      title="订单收银台"
       width="480px"
       :close-on-click-modal="false"
       destroy-on-close
     >
-      <div class="pay-body">
-        <div class="pay-amount-box">
-          <div class="pay-label">待支付金额</div>
-          <div class="pay-val">¥ {{ payingOrder?.totalAmount?.toFixed(2) }}</div>
-          <div class="pay-sub">订单号：{{ payingOrder?.orderNo }}</div>
-        </div>
+      <div class="pay-box">
+        <p class="pay-label">待支付金额</p>
+        <p class="pay-money mono">
+          <span class="symbol">¥</span>{{ Number(payingOrder?.totalAmount ?? 0).toFixed(2) }}
+        </p>
+        <p class="pay-no mono">订单号 {{ payingOrder?.orderNo }}</p>
 
-        <div class="method-card">
-          <el-icon class="method-icon"><WalletFilled /></el-icon>
-          <div class="method-name">模拟快捷支付通道</div>
-          <el-tag type="success" size="small">极速免密</el-tag>
+        <div class="pay-method">
+          <span class="method-icon"><el-icon><WalletFilled /></el-icon></span>
+          <div class="method-info">
+            <p class="method-name">在线支付</p>
+            <p class="method-desc">支持微信 / 支付宝 / 银行卡</p>
+          </div>
+          <span class="method-badge">推荐</span>
         </div>
       </div>
 
       <template #footer>
         <div class="dialog-footer">
-          <el-button @click="payVisible = false">取消</el-button>
-          <el-button
-            type="success"
-            :loading="paying"
-            @click="handleExecutePay"
-          >
-            确认支付 ¥ {{ payingOrder?.totalAmount?.toFixed(2) }}
-          </el-button>
+          <button class="btn btn--ghost btn--sm" type="button" @click="payVisible = false">取消</button>
+          <button class="btn btn--primary btn--sm" type="button" :disabled="paying" @click="handleExecutePay">
+            {{ paying ? '支付中…' : `确认支付 ¥${Number(payingOrder?.totalAmount ?? 0).toFixed(2)}` }}
+          </button>
         </div>
       </template>
     </el-dialog>
@@ -214,21 +235,20 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
-import {
-  List,
-  ArrowLeft,
-  Location,
-  WalletFilled
-} from '@element-plus/icons-vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { ArrowLeft, Location, Picture, WalletFilled } from '@element-plus/icons-vue'
 import {
   getMyOrdersApi,
   getOrderDetailApi,
   payOrderApi,
+  confirmReceiptApi,
+  cancelOrderApi,
   type OrderSummary,
   type OrderDetail
 } from '@/api/order'
 import { useUserStore } from '@/stores/user'
+import { formatDateTime } from '@/utils/format'
+import { getOrderStatusText } from '@/utils/order'
 
 const router = useRouter()
 const userStore = useUserStore()
@@ -247,6 +267,31 @@ const currentDetail = ref<OrderDetail | null>(null)
 const payVisible = ref(false)
 const payingOrder = ref<OrderSummary | null>(null)
 
+const statusTabs = [
+  { value: '', label: '全部订单' },
+  { value: 'UNPAID', label: '待付款' },
+  { value: 'PAID', label: '已支付' },
+  { value: 'SHIPPED', label: '已发货' },
+  { value: 'COMPLETED', label: '已完成' }
+]
+
+function statusClass(status: string) {
+  switch (status) {
+    case 'UNPAID':
+      return 'is-warn'
+    case 'PAID':
+      return 'is-info'
+    case 'SHIPPED':
+      return 'is-violet'
+    case 'COMPLETED':
+      return 'is-ok'
+    case 'CANCELLED':
+      return 'is-muted'
+    default:
+      return ''
+  }
+}
+
 onMounted(async () => {
   if (!userStore.isLoggedIn) {
     ElMessage.warning('请先登录账号后再查看订单列表')
@@ -261,59 +306,30 @@ async function fetchOrders() {
   try {
     const res = await getMyOrdersApi({
       pageNum: pageNum.value,
-      pageSize: pageSize.value
+      pageSize: pageSize.value,
+      status: activeStatus.value || undefined
     })
     if (res) {
-      let filtered = res.records || []
-      if (activeStatus.value) {
-        filtered = filtered.filter((o) => o.status === activeStatus.value)
-      }
-      orders.value = filtered
+      orders.value = res.records || []
       total.value = res.total || 0
     }
   } catch (err: any) {
-    ElMessage.error(err.message || '获取订单列表失败')
+    console.error('获取订单列表失败', err)
   } finally {
     loading.value = false
   }
 }
 
-function handleStatusChange() {
+function changeStatus(status: string) {
+  activeStatus.value = status
+  pageNum.value = 1
   fetchOrders()
 }
 
-function getStatusTagType(status: string) {
-  switch (status) {
-    case 'UNPAID':
-      return 'warning'
-    case 'PAID':
-      return 'success'
-    case 'SHIPPED':
-      return 'primary'
-    case 'COMPLETED':
-      return 'info'
-    case 'CANCELLED':
-      return 'danger'
-    default:
-      return 'info'
-  }
-}
-
-function getStatusText(status: string) {
-  switch (status) {
-    case 'UNPAID':
-      return '待付款'
-    case 'PAID':
-      return '已付款'
-    case 'SHIPPED':
-      return '已发货'
-    case 'COMPLETED':
-      return '已完成'
-    case 'CANCELLED':
-      return '已取消'
-    default:
-      return status
-  }
+function handleSizeChange(size: number) {
+  pageSize.value = size
+  pageNum.value = 1
+  fetchOrders()
 }
 
 async function openDetailModal(orderId: number) {
@@ -322,7 +338,7 @@ async function openDetailModal(orderId: number) {
     currentDetail.value = detail
     detailVisible.value = true
   } catch (err: any) {
-    ElMessage.error(err.message || '获取订单详情失败')
+    console.error('获取订单详情失败', err)
   }
 }
 
@@ -340,265 +356,588 @@ async function handleExecutePay() {
     payVisible.value = false
     await fetchOrders()
   } catch (err: any) {
-    ElMessage.error(err.message || '支付失败')
+    console.error('支付失败', err)
   } finally {
     paying.value = false
+  }
+}
+
+async function handleCancelOrder(order: OrderSummary) {
+  try {
+    await ElMessageBox.confirm(
+      `确定取消订单 ${order.orderNo} 吗？取消后商品库存将自动归还。`,
+      '取消订单确认',
+      { type: 'warning', confirmButtonText: '确认取消', cancelButtonText: '再想想' }
+    )
+  } catch {
+    return
+  }
+  try {
+    await cancelOrderApi(order.id)
+    ElMessage.success('订单已取消，库存已归还')
+    await fetchOrders()
+  } catch (err: any) {
+    console.error('取消订单失败', err)
+  }
+}
+
+async function handleConfirmReceipt(order: OrderSummary) {
+  try {
+    await ElMessageBox.confirm(
+      `请确认已收到订单 ${order.orderNo} 的商品，确认后订单将标记为已完成。`,
+      '确认收货',
+      { type: 'info', confirmButtonText: '确认已收到', cancelButtonText: '取消' }
+    )
+  } catch {
+    return
+  }
+  try {
+    await confirmReceiptApi(order.id)
+    ElMessage.success('确认收货成功')
+    await fetchOrders()
+  } catch (err: any) {
+    console.error('确认收货失败', err)
   }
 }
 </script>
 
 <style scoped>
-.orders-container {
-  max-width: 1200px;
-  margin: 0 auto;
-  padding: 24px 20px 80px;
+.orders-page {
+  padding-top: 28px;
+  padding-bottom: 40px;
 }
 
-.orders-header {
+/* 页头 */
+.orders-head {
   display: flex;
+  align-items: flex-end;
   justify-content: space-between;
-  align-items: center;
-  margin-bottom: 20px;
+  gap: 24px;
+  padding: 12px 0 30px;
+  flex-wrap: wrap;
 }
 
-.title-wrap {
-  display: flex;
-  align-items: center;
-  gap: 10px;
+.orders-title {
+  margin-top: 12px;
 }
 
-.title-icon {
-  font-size: 26px;
-  color: #2563eb;
+.orders-sub {
+  margin-top: 10px;
+  font-size: 13px;
+  color: var(--text-3);
 }
 
-.title-wrap h2 {
-  font-size: 24px;
+.accent {
+  color: var(--cyan);
   font-weight: 700;
-  color: #111827;
-  margin: 0;
 }
 
-.orders-tabs {
-  margin-bottom: 20px;
+/* 状态筛选 */
+.status-tabs {
+  display: flex;
+  gap: 6px;
+  padding: 5px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.03);
+  width: fit-content;
+  margin-bottom: 26px;
+  max-width: 100%;
+  overflow-x: auto;
 }
 
-.empty-card {
-  padding: 60px 0;
-  border-radius: 12px;
+.status-tab {
+  padding: 8px 18px;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-3);
+  font-family: var(--font-body);
+  font-size: 12.5px;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.3s var(--ease);
 }
 
-.order-card-list {
+.status-tab:hover {
+  color: var(--text);
+}
+
+.status-tab.is-active {
+  background: var(--grad);
+  color: #07080d;
+  font-weight: 600;
+}
+
+/* 空态 */
+.orders-empty {
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  padding: 100px 24px;
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius-xl);
+  text-align: center;
+}
+
+.empty-orb {
+  width: 96px;
+  height: 96px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 40% 35%, rgba(124, 92, 255, 0.6), rgba(34, 211, 238, 0.1) 62%, transparent 74%);
+  filter: blur(8px);
+  margin-bottom: 8px;
+}
+
+.empty-title {
+  font-size: 21px;
+  font-weight: 700;
+}
+
+.empty-desc {
+  font-size: 13px;
+  color: var(--text-3);
+  margin-bottom: 10px;
+}
+
+/* 订单卡片 */
+.orders-body {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 18px;
+  min-height: 220px;
 }
 
 .order-card {
-  background: #ffffff;
-  border: 1px solid #e5e7eb;
-  border-radius: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xl);
+  background: rgba(255, 255, 255, 0.025);
   overflow: hidden;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+  transition: border-color 0.4s var(--ease), transform 0.4s var(--ease);
 }
 
-.card-header {
+.order-card:hover {
+  border-color: rgba(124, 92, 255, 0.3);
+}
+
+.order-head {
   display: flex;
+  align-items: center;
   justify-content: space-between;
-  align-items: center;
-  padding: 12px 20px;
-  background-color: #f9fafb;
-  border-bottom: 1px solid #e5e7eb;
-  font-size: 13px;
+  gap: 16px;
+  padding: 16px 24px;
+  border-bottom: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.02);
 }
 
-.header-left {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.order-no-label {
-  color: #6b7280;
-}
-
-.order-no-val {
-  font-weight: 600;
-  color: #1f2937;
-}
-
-.header-time {
-  color: #9ca3af;
-}
-
-.card-items {
-  padding: 16px 20px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.order-item-row {
+.order-head-left {
   display: flex;
   align-items: center;
   gap: 16px;
+  flex-wrap: wrap;
+}
+
+.order-no {
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  color: var(--text);
+}
+
+.order-time {
+  font-size: 11.5px;
+  color: var(--text-4);
+}
+
+/* 状态标签 */
+.status-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.05);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-2);
+  white-space: nowrap;
+}
+
+.status-chip.is-warn {
+  border-color: rgba(251, 191, 36, 0.4);
+  background: rgba(251, 191, 36, 0.1);
+  color: #fcd77a;
+}
+
+.status-chip.is-info {
+  border-color: rgba(34, 211, 238, 0.4);
+  background: rgba(34, 211, 238, 0.1);
+  color: #7ce8f7;
+}
+
+.status-chip.is-violet {
+  border-color: rgba(124, 92, 255, 0.45);
+  background: rgba(124, 92, 255, 0.14);
+  color: #c4b8ff;
+}
+
+.status-chip.is-ok {
+  border-color: rgba(52, 211, 153, 0.4);
+  background: rgba(52, 211, 153, 0.1);
+  color: #7cf0c4;
+}
+
+.status-chip.is-muted {
+  color: var(--text-4);
+}
+
+/* 商品行 */
+.order-items {
+  padding: 8px 24px;
+}
+
+.order-item {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 14px 0;
+  border-bottom: 1px dashed var(--line);
+}
+
+.order-item:last-child {
+  border-bottom: none;
 }
 
 .item-img {
-  width: 60px;
-  height: 60px;
-  border-radius: 6px;
-  border: 1px solid #f3f4f6;
+  width: 58px;
+  height: 58px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line);
   flex-shrink: 0;
+}
+
+.item-fallback {
+  width: 100%;
+  height: 100%;
+  display: grid;
+  place-items: center;
+  color: var(--text-4);
 }
 
 .item-info {
   flex: 1;
+  min-width: 0;
 }
 
 .item-title {
   font-size: 14px;
   font-weight: 600;
-  color: #1f2937;
-}
-
-.item-price-meta {
-  font-size: 13px;
-  color: #6b7280;
-  margin-top: 4px;
-}
-
-.item-subtotal {
-  font-size: 15px;
-  font-weight: 600;
-  color: #111827;
-}
-
-.card-footer {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 14px 20px;
-  background-color: #fafbfc;
-  border-top: 1px solid #f3f4f6;
-  font-size: 13px;
-}
-
-.shipping-info {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  color: #6b7280;
-  max-width: 50%;
+  color: var(--text);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.footer-actions {
+.item-meta {
+  margin-top: 4px;
+  font-size: 11.5px;
+  color: var(--text-4);
+}
+
+.item-subtotal {
+  font-size: 14px;
+  color: var(--text-2);
+}
+
+/* 卡片脚 */
+.order-foot {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 20px;
+  padding: 16px 24px;
+  border-top: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.02);
+  flex-wrap: wrap;
+}
+
+.ship-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 200px;
+  font-size: 11.5px;
+  color: var(--text-4);
+  overflow: hidden;
+}
+
+.ship-info span {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ship-info .el-icon {
+  flex-shrink: 0;
+  color: var(--text-3);
+}
+
+.foot-right {
+  display: flex;
+  align-items: center;
+  gap: 22px;
+  flex-wrap: wrap;
 }
 
 .order-total {
   display: flex;
   align-items: baseline;
+  gap: 10px;
 }
 
 .total-label {
-  color: #4b5563;
+  font-size: 11.5px;
+  color: var(--text-4);
 }
 
-.currency {
-  font-size: 14px;
-  font-weight: 700;
-  color: #dc2626;
-  margin-left: 4px;
-}
-
-.amount {
-  font-size: 20px;
-  font-weight: 800;
-  color: #dc2626;
+.order-total .price .amount {
+  font-size: 24px;
 }
 
 .btn-group {
   display: flex;
-  gap: 10px;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
-.pagination-wrapper {
-  margin-top: 24px;
+.pagination-bar {
   display: flex;
   justify-content: flex-end;
+  margin-top: 12px;
 }
 
-/* Pay Dialog */
-.pay-amount-box {
-  text-align: center;
-  padding: 16px 0;
-  border-bottom: 1px dashed #e5e7eb;
+/* 详情 */
+.detail-body {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
 }
 
-.pay-label {
+.detail-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1px;
+  background: var(--line);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.detail-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 14px 16px;
+  background: #0a0d16;
+}
+
+.detail-cell.is-wide {
+  grid-column: span 2;
+}
+
+.cell-label {
+  font-size: 10.5px;
+  letter-spacing: 0.1em;
+  color: var(--text-4);
+}
+
+.cell-value {
   font-size: 13px;
-  color: #6b7280;
+  color: var(--text-2);
 }
 
-.pay-val {
-  font-size: 32px;
-  font-weight: 800;
-  color: #059669;
-  margin: 6px 0;
+.detail-label {
+  font-size: 10px;
+  letter-spacing: 0.2em;
+  color: var(--cyan);
 }
 
-.pay-sub {
-  font-size: 13px;
-  color: #4b5563;
+.detail-items {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
-.method-card {
+.detail-item {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 14px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.detail-img {
+  width: 44px;
+  height: 44px;
   border-radius: 8px;
-  border: 1px solid #10b981;
-  background-color: #ecfdf5;
-  margin-top: 16px;
+  flex-shrink: 0;
+}
+
+.detail-item-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.detail-item-name {
+  font-size: 13px;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.detail-item-meta {
+  margin-top: 3px;
+  font-size: 11px;
+  color: var(--text-4);
+}
+
+.detail-item-price {
+  font-size: 13px;
+  color: var(--text-2);
+}
+
+.detail-total {
+  display: flex;
+  align-items: baseline;
+  justify-content: flex-end;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid rgba(255, 92, 122, 0.24);
+  border-radius: var(--radius);
+  background: rgba(255, 92, 122, 0.06);
+  font-size: 12.5px;
+  color: var(--text-2);
+}
+
+/* 支付 */
+.pay-box {
+  text-align: center;
+}
+
+.pay-label {
+  font-size: 12px;
+  color: var(--text-3);
+}
+
+.pay-money {
+  margin: 8px 0 6px;
+  font-size: 42px;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  color: var(--green);
+}
+
+.pay-money .symbol {
+  font-size: 22px;
+  margin-right: 2px;
+}
+
+.pay-no {
+  font-size: 11px;
+  color: var(--text-4);
+}
+
+.pay-method {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 24px;
+  padding: 16px;
+  border: 1px solid rgba(52, 211, 153, 0.4);
+  border-radius: var(--radius);
+  background: rgba(52, 211, 153, 0.07);
+  text-align: left;
 }
 
 .method-icon {
-  font-size: 24px;
-  color: #059669;
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  border-radius: 12px;
+  background: rgba(52, 211, 153, 0.15);
+  color: var(--green);
+  font-size: 20px;
+}
+
+.method-info {
+  flex: 1;
 }
 
 .method-name {
-  flex: 1;
   font-size: 14px;
   font-weight: 600;
-  color: #065f46;
+  color: var(--text);
 }
 
-.detail-items-title {
-  font-size: 14px;
-  font-weight: 600;
-  color: #111827;
-  margin: 16px 0 8px;
+.method-desc {
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--text-3);
 }
 
-.detail-total-box {
+.method-badge {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.16em;
+  color: var(--green);
+}
+
+.dialog-footer {
   display: flex;
   justify-content: flex-end;
-  align-items: baseline;
-  margin-top: 16px;
-  font-size: 15px;
+  gap: 12px;
 }
 
-.total-money {
-  font-size: 22px;
-  color: #dc2626;
-  margin-left: 6px;
+/* 响应式 */
+@media (max-width: 760px) {
+  .order-foot {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .foot-right {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .detail-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .detail-cell.is-wide {
+    grid-column: span 1;
+  }
+}
+
+@media (max-width: 520px) {
+  .order-head {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .order-items,
+  .order-foot {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+
+  .btn-group {
+    width: 100%;
+  }
 }
 </style>

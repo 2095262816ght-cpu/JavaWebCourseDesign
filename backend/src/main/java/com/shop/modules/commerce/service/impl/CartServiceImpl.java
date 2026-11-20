@@ -82,7 +82,8 @@ public class CartServiceImpl implements CartService {
             );
             voList.add(vo);
 
-            if (isChecked && isProductValid && Integer.valueOf(1).equals(product.getStatus())) {
+            if (isChecked && isProductValid && Integer.valueOf(1).equals(product.getStatus())
+                    && product.getStock() != null && product.getStock() > 0) {
                 checkedCount += item.getQuantity();
                 totalAmount = totalAmount.add(subtotal);
             }
@@ -99,7 +100,7 @@ public class CartServiceImpl implements CartService {
         }
 
         ShopProduct product = productMapper.selectById(cmd.getProductId());
-        if (product == null || product.getIsDeleted() == 1 || !Integer.valueOf(1).equals(product.getStatus())) {
+        if (product == null || !Integer.valueOf(0).equals(product.getIsDeleted()) || !Integer.valueOf(1).equals(product.getStatus())) {
             throw new BusinessException("该商品不存在或已下架");
         }
 
@@ -110,11 +111,12 @@ public class CartServiceImpl implements CartService {
                 .eq(ShopCartItem::getProductId, cmd.getProductId());
         ShopCartItem existing = cartItemMapper.selectOne(queryWrapper);
 
+        int availableStock = product.getStock() != null ? product.getStock() : 0;
         int currentQty = existing != null ? existing.getQuantity() : 0;
         int targetQty = currentQty + addQty;
-        if (targetQty > product.getStock()) {
+        if (targetQty > availableStock) {
             String prefix = existing != null ? "加购数量" : "购买数量";
-            throw new BusinessException(prefix + "超过商品可用库存（当前库存：" + product.getStock() + " 件）");
+            throw new BusinessException(prefix + "超过商品可用库存（当前库存：" + availableStock + " 件）");
         }
 
         if (existing != null) {
@@ -143,18 +145,41 @@ public class CartServiceImpl implements CartService {
             throw new BusinessException(ResultCode.NOT_FOUND.getCode(), "未找到该购物车记录");
         }
 
+        ShopProduct product = productMapper.selectById(item.getProductId());
+        boolean isProductAvailable = product != null
+                && Integer.valueOf(0).equals(product.getIsDeleted())
+                && Integer.valueOf(1).equals(product.getStatus());
+
         if (quantity != null) {
             if (quantity <= 0) {
                 throw new BusinessException("购买数量必须大于0");
             }
-            ShopProduct product = productMapper.selectById(item.getProductId());
-            if (product != null && quantity > product.getStock()) {
-                throw new BusinessException("修改数量不可超过商品库存（当前库存：" + product.getStock() + " 件）");
+            if (!isProductAvailable) {
+                throw new BusinessException("该商品已下架或不存在，无法修改购买数量");
+            }
+            int availableStock = product.getStock() != null ? product.getStock() : 0;
+            if (availableStock <= 0) {
+                throw new BusinessException("该商品当前已售罄，无法调整数量");
+            }
+            if (quantity > availableStock) {
+                throw new BusinessException("修改数量不可超过商品库存（当前库存：" + availableStock + " 件）");
             }
             item.setQuantity(quantity);
         }
 
         if (checked != null) {
+            if (Boolean.TRUE.equals(checked)) {
+                if (!isProductAvailable) {
+                    throw new BusinessException("该商品已下架或不存在，不可勾选结算");
+                }
+                int availableStock = product.getStock() != null ? product.getStock() : 0;
+                if (availableStock <= 0) {
+                    throw new BusinessException("该商品当前已售罄，不可勾选结算");
+                }
+                if (item.getQuantity() > availableStock) {
+                    throw new BusinessException("购买数量超过当前库存（" + availableStock + " 件），请先调整数量后再勾选");
+                }
+            }
             item.setChecked(checked ? 1 : 0);
         }
 

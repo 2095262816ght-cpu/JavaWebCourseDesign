@@ -135,6 +135,75 @@ class OrderCheckoutServiceTest {
     }
 
     @Test
+    @DisplayName("测试已发货订单确认收货后流转为已完成")
+    void testConfirmReceiptMarksOrderCompleted() {
+        Long testUserId = 3005L;
+        Long productId = createTempProduct(10);
+        cartService.addItem(testUserId, new AddCartCommand(productId, 1));
+        CheckoutCommand cmd = new CheckoutCommand("钱同学", "13500001111", "杭州市西湖区文三路");
+        OrderCheckoutResult result = orderCheckoutService.checkout(testUserId, cmd);
+
+        orderCheckoutService.pay(testUserId, result.getOrderNo());
+        orderCheckoutService.markShipped(result.getOrderId());
+        orderCheckoutService.confirmReceipt(testUserId, result.getOrderId());
+
+        ShopOrder completed = orderMapper.selectById(result.getOrderId());
+        assertThat(completed.getStatus()).isEqualTo("COMPLETED");
+    }
+
+    @Test
+    @DisplayName("测试未发货订单取消后状态为已取消且库存精确归还")
+    void testCancelOrderRestoresStock() {
+        Long testUserId = 3006L;
+        Long productId = createTempProduct(10);
+
+        cartService.addItem(testUserId, new AddCartCommand(productId, 2));
+        CheckoutCommand cmd = new CheckoutCommand("孙同学", "13500002222", "成都市高新区天府大道");
+        OrderCheckoutResult result = orderCheckoutService.checkout(testUserId, cmd);
+        assertThat(productMapper.selectById(productId).getStock()).isEqualTo(8);
+
+        orderCheckoutService.cancelOrder(testUserId, result.getOrderId());
+
+        assertThat(orderMapper.selectById(result.getOrderId()).getStatus()).isEqualTo("CANCELLED");
+        assertThat(productMapper.selectById(productId).getStock()).isEqualTo(10);
+    }
+
+    @Test
+    @DisplayName("测试已发货订单不允许取消")
+    void testCancelShippedOrderThrowsException() {
+        Long testUserId = 3007L;
+        Long productId = createTempProduct(10);
+        cartService.addItem(testUserId, new AddCartCommand(productId, 1));
+        CheckoutCommand cmd = new CheckoutCommand("周同学", "13500003333", "武汉市洪山区珞喻路");
+        OrderCheckoutResult result = orderCheckoutService.checkout(testUserId, cmd);
+
+        orderCheckoutService.pay(testUserId, result.getOrderNo());
+        orderCheckoutService.markShipped(result.getOrderId());
+
+        assertThatThrownBy(() -> orderCheckoutService.cancelOrder(testUserId, result.getOrderId()))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("仅未发货订单允许取消");
+    }
+
+    /**
+     * 创建独立测试商品，避免依赖种子数据的实时库存状态
+     */
+    private Long createTempProduct(int stock) {
+        ShopProduct product = new ShopProduct();
+        product.setName("状态机测试商品-" + System.nanoTime());
+        product.setSubtitle("订单状态流转验证专用");
+        product.setBrandId(1L);
+        product.setCategoryId(5L);
+        product.setPrice(new BigDecimal("199.00"));
+        product.setOriginalPrice(new BigDecimal("299.00"));
+        product.setStock(stock);
+        product.setStatus(1);
+        product.setMainImage("https://images.unsplash.com/test-state-machine.png");
+        productMapper.insert(product);
+        return product.getId();
+    }
+
+    @Test
     @DisplayName("测试管理后台多维订单检索")
     void testAdminOrderQuery() {
         Long testUserId = 3004L;

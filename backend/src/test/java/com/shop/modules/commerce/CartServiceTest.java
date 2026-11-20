@@ -114,4 +114,44 @@ class CartServiceTest {
                 .isInstanceOf(BusinessException.class)
                 .hasMessageContaining("超过商品可用库存");
     }
+
+    @Test
+    @DisplayName("测试已下架或零库存商品不可增加数量或重新勾选，但允许取消勾选")
+    void testUpdateInvalidOrOutOfStockCartItem() {
+        Long testUserId = 2005L;
+
+        // 先正常加购商品 2
+        cartService.addItem(testUserId, new AddCartCommand(2L, 1));
+        Long cartItemId = cartService.getCart(testUserId).getItems().get(0).getId();
+
+        // 模拟管理员将商品 2 库存清零并下架
+        ShopProduct product = productMapper.selectById(2L);
+        product.setStock(0);
+        product.setStatus(0);
+        productMapper.updateById(product);
+
+        // 此时尝试修改数量应抛出异常
+        assertThatThrownBy(() -> cartService.updateItem(testUserId, cartItemId, 2, null))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("已下架");
+
+        // 仍应允许取消勾选，以免顾客被锁死在失效勾选状态
+        cartService.updateItem(testUserId, cartItemId, null, false);
+        assertThat(cartService.getCart(testUserId).getItems().get(0).getChecked()).isFalse();
+
+        // 但不可再重新勾选已失效商品
+        assertThatThrownBy(() -> cartService.updateItem(testUserId, cartItemId, null, true))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("不可勾选");
+
+        // 恢复商品上架但保持库存为 0，仍不可勾选或修改数量
+        product.setStatus(1);
+        productMapper.updateById(product);
+        assertThatThrownBy(() -> cartService.updateItem(testUserId, cartItemId, null, true))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("售罄");
+        assertThatThrownBy(() -> cartService.updateItem(testUserId, cartItemId, 2, null))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("售罄");
+    }
 }

@@ -18,7 +18,7 @@
         <el-form-item label="关键字">
           <el-input
             v-model="queryForm.keyword"
-            placeholder="搜索品牌名称或描述"
+            placeholder="搜索品牌名称、产地或描述"
             clearable
             :prefix-icon="Search"
             @keyup.enter="handleSearch"
@@ -79,7 +79,7 @@
         <el-table-column prop="origin" label="品牌产地" width="140" align="center">
           <template #default="{ row }">
             <el-tag v-if="row.origin" type="info" size="small">{{ row.origin }}</el-tag>
-            <span v-else style="color: #9ca3af; font-size: 12px;">未设置</span>
+            <span v-else style="color: var(--text-4); font-size: 12px;">未设置</span>
           </template>
         </el-table-column>
 
@@ -158,9 +158,11 @@
               :action="uploadActionUrl"
               :headers="uploadHeaders"
               name="file"
+              accept=".jpg,.jpeg,.png,.gif,.webp,.bmp,.ico"
               :show-file-list="false"
               :on-success="handleUploadSuccess"
-              :before-upload="beforeUpload"
+              :on-error="handleUploadError"
+              :before-upload="beforeImageUpload"
             >
               <img v-if="formData.logo" :src="formData.logo" class="uploaded-logo" />
               <el-icon v-else class="uploader-icon"><Plus /></el-icon>
@@ -215,9 +217,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted, computed } from 'vue'
+import { ref, reactive, onMounted, computed, nextTick } from 'vue'
 import { Plus, Search, Refresh, Edit, Delete } from '@element-plus/icons-vue'
-import { ElMessage, ElMessageBox, type FormInstance, type FormRules, type UploadProps } from 'element-plus'
+import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
 import {
   getAdminBrandsApi,
   createBrandApi,
@@ -227,6 +229,7 @@ import {
   type BrandCommand,
   type BrandQueryParams
 } from '@/api/brand'
+import { beforeImageUpload } from '@/utils/image'
 
 const loading = ref(false)
 const brandList = ref<Brand[]>([])
@@ -279,32 +282,20 @@ const uploadHeaders = computed(() => {
   return token ? { satoken: token } : {}
 })
 
-const beforeUpload: UploadProps['beforeUpload'] = (file) => {
-  const isImage = file.type.startsWith('image/')
-  const isLt5M = file.size / 1024 / 1024 < 5
-
-  if (!isImage) {
-    ElMessage.error('只允许上传图片文件 (JPG/PNG/WebP/SVG)')
-    return false
-  }
-  if (!isLt5M) {
-    ElMessage.error('上传图片大小不能超过 5MB')
-    return false
-  }
-  return true
-}
-
 const handleUploadSuccess = (response: any) => {
-  // request interceptor unwraps Result<String> to response string or url
   if (typeof response === 'string') {
     formData.logo = response
     ElMessage.success('Logo 上传成功')
-  } else if (response && response.data) {
+  } else if (response && response.code === 200 && response.data) {
     formData.logo = response.data
     ElMessage.success('Logo 上传成功')
   } else {
-    ElMessage.success('Logo 上传成功')
+    ElMessage.error(response?.message || 'Logo 上传失败，请重试')
   }
+}
+
+const handleUploadError = () => {
+  ElMessage.error('Logo 上传失败，请检查登录状态及图片格式')
 }
 
 // Fetch list
@@ -319,6 +310,8 @@ const fetchBrands = async () => {
     })
     brandList.value = res.records
     pagination.total = res.total
+  } catch (err) {
+    console.error('加载品牌列表失败', err)
   } finally {
     loading.value = false
   }
@@ -358,6 +351,7 @@ const openCreateDialog = () => {
   formData.sort = 1
   formData.status = 1
   dialogVisible.value = true
+  nextTick(() => formRef.value?.clearValidate())
 }
 
 const openEditDialog = (row: Brand) => {
@@ -370,6 +364,7 @@ const openEditDialog = (row: Brand) => {
   formData.sort = row.sort
   formData.status = row.status
   dialogVisible.value = true
+  nextTick(() => formRef.value?.clearValidate())
 }
 
 const submitForm = async () => {
@@ -387,6 +382,8 @@ const submitForm = async () => {
       }
       dialogVisible.value = false
       fetchBrands()
+    } catch {
+      // 错误提示由请求拦截器统一处理
     } finally {
       submitting.value = false
     }
@@ -406,6 +403,9 @@ const handleDelete = (row: Brand) => {
     try {
       await deleteBrandApi(row.id)
       ElMessage.success('品牌删除成功')
+      if (brandList.value.length === 1 && pagination.current > 1) {
+        pagination.current -= 1
+      }
       fetchBrands()
     } catch {
       // Handled by global interceptor
@@ -429,28 +429,31 @@ onMounted(() => {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  background: #ffffff;
+  background: var(--glass-bg);
   padding: 20px 24px;
-  border-radius: 8px;
-  border: 1px solid #e5e7eb;
+  border-radius: 16px;
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--glass-shadow);
+  backdrop-filter: blur(var(--glass-blur)) saturate(165%);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(165%);
 }
 
 .page-title {
   margin: 0 0 6px 0;
   font-size: 20px;
   font-weight: 600;
-  color: #111827;
+  color: var(--text);
 }
 
 .page-desc {
   margin: 0;
   font-size: 13px;
-  color: #6b7280;
+  color: var(--text-3);
 }
 
 .filter-card {
-  border-radius: 8px;
-  border: 1px solid #e5e7eb;
+  border-radius: 16px;
+  border: 1px solid var(--glass-border);
 }
 
 .filter-form {
@@ -466,14 +469,14 @@ onMounted(() => {
 
 .table-card {
   border-radius: 8px;
-  border: 1px solid #e5e7eb;
+  border: 1px solid var(--line);
 }
 
 .brand-logo-img {
   width: 54px;
   height: 54px;
   border-radius: 6px;
-  border: 1px solid #e5e7eb;
+  border: 1px solid var(--line);
   object-fit: cover;
 }
 
@@ -481,8 +484,8 @@ onMounted(() => {
   width: 54px;
   height: 54px;
   border-radius: 6px;
-  background: #f3f4f6;
-  color: #9ca3af;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-4);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -491,11 +494,11 @@ onMounted(() => {
 
 .brand-name-text {
   font-weight: 600;
-  color: #1f2937;
+  color: var(--text);
 }
 
 .brand-desc-text {
-  color: #4b5563;
+  color: var(--text-2);
   font-size: 13px;
   display: -webkit-box;
   -webkit-line-clamp: 2;
@@ -516,7 +519,7 @@ onMounted(() => {
 }
 
 .logo-uploader {
-  border: 1px dashed #d9d9d9;
+  border: 1px dashed var(--line-strong);
   border-radius: 8px;
   cursor: pointer;
   position: relative;
@@ -530,12 +533,12 @@ onMounted(() => {
 }
 
 .logo-uploader:hover {
-  border-color: #409eff;
+  border-color: var(--violet);
 }
 
 .uploader-icon {
   font-size: 28px;
-  color: #8c939d;
+  color: var(--text-3);
 }
 
 .uploaded-logo {
@@ -546,7 +549,7 @@ onMounted(() => {
 
 .hint-text {
   font-size: 12px;
-  color: #9ca3af;
+  color: var(--text-4);
   margin-top: 4px;
   display: inline-block;
 }
@@ -554,6 +557,6 @@ onMounted(() => {
 .form-item-tip {
   margin-left: 12px;
   font-size: 12px;
-  color: #9ca3af;
+  color: var(--text-4);
 }
 </style>

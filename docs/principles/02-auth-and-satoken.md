@@ -53,23 +53,24 @@ eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJsb2dpbklkIjoxLCJyb2xlIjoiUk9MRV9BRE1JTiI
 经过 Base64URL 编码后形成第一部分。
 
 #### 2. Payload（载荷）
-承载实际业务声明（Claims），包含标准声明与自定义业务字段：
+承载实际业务声明（Claims）。Sa-Token JWT Simple 模式下自动写入登录标识与防重放元数据：
 ```json
 {
+  "loginType": "login",
   "loginId": 1,
-  "role": "ROLE_ADMIN",
-  "iat": 1730700000,
-  "exp": 1733292000
+  "device": "default-device",
+  "eff": 1733292000000,
+  "rnStr": "x8Kp92mQ..."
 }
 ```
-经过 Base64URL 编码后形成第二部分。**注意：Payload 属于可逆编码而非加密，绝不能存放用户明文密码等高敏感数据。**
+经过 Base64URL 编码后形成第二部分。**注意：Payload 属于可逆编码而非加密，绝不能存放用户明文密码等高敏感数据；且本项目不将角色硬编码进 Payload，而是在鉴权时由服务端实时查询核验。**
 
 #### 3. Signature（防篡改数字签名）
 由服务端持有绝密的私钥（Secret Key），将前两部分的 Base64 编码字符串使用指定算法（如 HMAC-SHA256）生成哈希签名：
 $$\text{Signature} = \text{HMACSHA256}(\text{base64UrlEncode}(\text{Header}) + "." + \text{base64UrlEncode}(\text{Payload}), \text{SecretKey})$$
 
 > [!IMPORTANT]
-> **防伪核心原理**：客户端若试图篡改 Payload 中的 `loginId` 或 `role`（如将 `ROLE_CUSTOMER` 篡改为 `ROLE_ADMIN`），由于黑客无法获知服务端的 `SecretKey`，篡改后的内容必定无法计算出相吻合的 `Signature`。服务端验签时会立即捕获异常并拦截请求。
+> **防伪核心原理**：客户端若试图篡改 Payload 中的 `loginId`（如试图冒充管理员 ID `1`），由于黑客无法获知服务端的 `SecretKey`，篡改后的内容必定无法计算出相吻合的 `Signature`。服务端验签时会立即捕获异常并拦截请求。
 
 ### 2.2 本项目 Sa-Token JWT Simple 模式落地实践
 
@@ -107,8 +108,6 @@ sa-token:
   is-share: true                          # 同一账号共享同一 Token
   token-style: jwt                        # 指定 Token 风格为标准 JWT
   jwt-secret-key: shop-platform-jwt-secret-key-32chars-min-abcdef123456  # HMAC-SHA256 签名绝密私钥
-  is-read-header: true                    # 允许从 Header 读取
-  is-read-cookie: false                   # 禁用 Cookie 传输，彻底杜绝 CSRF
 ```
 
 ---
@@ -135,11 +134,12 @@ sequenceDiagram
     Interceptor->>StpUtil: 解析 Header 中的 satoken 提取 LoginId
     Interceptor->>Router: 执行路由匹配规则 (SaRouter.match)
     alt 匹配 /api/admin/** 路径
+        Router->>Router: checkActiveUser() 校验登录态与账号启用
         Router->>StpUtil: checkRole("ROLE_ADMIN")
         StpUtil->>Interface: getRoleList(loginId, "login")
         Interface-->>StpUtil: 返回数据库用户的真实角色列表
         alt 角色不包含 ROLE_ADMIN
-            StpUtil-->>Client: 抛出 NotRoleException -> 全局异常捕获返回 403 Forbidden
+            StpUtil-->>Client: 抛出 NotRoleException -> 全局异常捕获返回业务码 code=403
         end
     end
     Interceptor->>Controller: 鉴权通过，放行请求至业务层
@@ -155,25 +155,59 @@ sequenceDiagram
 @Override
 public void addInterceptors(InterceptorRegistry registry) {
     registry.addInterceptor(new SaInterceptor(handle -> {
-        // 管理员专用接口防护：必须持有 ROLE_ADMIN 角色
-        SaRouter.match("/api/admin/**", r -> StpUtil.checkRole("ROLE_ADMIN"));
-        
-        // 顾客核心交互接口防护：必须完成登录认证
-        SaRouter.match("/api/auth/profile", r -> StpUtil.checkLogin());
+        // 管理员专用接口防护：先校验登录态与账号启用，再校验 ROLE_ADMIN
+        SaRouter.match("/api/admin/**", r -> {
+            checkActiveUser();
+            StpUtil.checkRole("ROLE_ADMIN");
+        });
+
+        // 顾客核心交互接口防护：校验登录态与账号启用
+        SaRouter.match("/api/auth/profile", r -> checkActiveUser());
         SaRouter.match("/api/auth/logout", r -> StpUtil.checkLogin());
-        SaRouter.match("/api/cart/**", r -> StpUtil.checkLogin());
-        SaRouter.match("/api/orders/**", r -> StpUtil.checkLogin());
+        SaRouter.match("/api/cart/**", r -> checkActiveUser());
+        SaRouter.match("/api/orders/**", r -> checkActiveUser());
+        SaRouter.match("/api/common/upload", r -> checkActiveUser());
     })).addPathPatterns("/**")
        .excludePathPatterns(
             "/api/auth/login",
             "/api/auth/register",
             "/api/portal/**",      // 商城前台浏览接口公开
-            "/api/common/**",
             "/uploads/**",         // 静态图片资源放行
             "/swagger-ui/**",      // 交互式 API 文档放行
             "/v3/api-docs/**",
             "/favicon.ico"
        );
+}
+
+/**
+ * 校验登录态，并结合 30 秒本地内存缓存（activeUserCache）高效确认账号处于启用状态
+ */
+private void checkActiveUser() {
+    StpUtil.checkLogin();
+    long userId = StpUtil.getLoginIdAsLong();
+    long now = System.currentTimeMillis();
+
+    Long activeUntil = activeUserCache.get(userId);
+    if (activeUntil != null && activeUntil > now) {
+        return;
+    }
+
+    SysUser user = sysUserMapper.selectById(userId);
+    if (user == null) {
+        StpUtil.logout();
+        throw new BusinessException(ResultCode.UNAUTHORIZED.getCode(), "用户不存在或登录已过期");
+    }
+    if (!user.isActive()) {
+        // 不缓存禁用结果：管理员重新启用后无需等待缓存过期
+        activeUserCache.remove(userId);
+        StpUtil.logout();
+        throw new BusinessException(ResultCode.FORBIDDEN.getCode(), "该账号已被禁用，请联系平台管理员");
+    }
+
+    if (activeUserCache.size() > ACTIVE_CACHE_CLEANUP_THRESHOLD) {
+        activeUserCache.entrySet().removeIf(entry -> entry.getValue() <= now);
+    }
+    activeUserCache.put(userId, now + ACTIVE_CACHE_TTL_MS);
 }
 ```
 
@@ -205,6 +239,11 @@ public class StpInterfaceImpl implements StpInterface {
     }
 
     @Override
+    public List<String> getPermissionList(Object loginId, String loginType) {
+        return Collections.emptyList();
+    }
+
+    @Override
     public List<String> getRoleList(Object loginId, String loginType) {
         if (loginId == null) {
             return Collections.emptyList();
@@ -212,8 +251,8 @@ public class StpInterfaceImpl implements StpInterface {
         try {
             Long userId = Long.valueOf(loginId.toString());
             SysUser user = sysUserMapper.selectById(userId);
-            // 实时校验：用户存在、拥有角色且账号状态必须为启用 (status == 1)
-            if (user != null && user.getRole() != null && user.getStatus() == 1) {
+            // 实时校验：用户存在、拥有角色且账号状态必须为启用 (user.isActive())
+            if (user != null && user.getRole() != null && user.isActive()) {
                 return List.of(user.getRole());
             }
         } catch (Exception ignored) {
@@ -224,7 +263,7 @@ public class StpInterfaceImpl implements StpInterface {
 ```
 
 > [!TIP]
-> **实时风控优势**：若管理员在后台将某一违规用户的 `status` 置为 `0`（封禁），该用户在下一次发起需要权限的请求时，`StpInterfaceImpl` 实时查出其不再具备可用角色，立即阻断其操作并强制拦截，实现了零时延的动态权限下发。
+> **双重实时风控优势**：管理员在后台封禁用户（`UserServiceImpl.updateUserStatus`）时，会同步调用 `StpUtil.logout(userId)` 立即注销其 Redis 会话使其下次请求触发 `code=401` 下线；同时即便极端场景下绕过注销，`checkActiveUser()` 与 `StpInterfaceImpl` 也会校验 `user.isActive()`，实现双重防线。
 
 ---
 
@@ -250,16 +289,16 @@ public class StpInterfaceImpl implements StpInterface {
 
 ### 6.1 前端路由与网络拦截测试（Vitest 自动化套件）
 - **路由守卫拦截测试**（`frontend/test/router.spec.ts`）：
-  - 断言未登录访客访问受保护的 `/admin` 或 `/orders` 路径时，路由守卫自动截断并重定向至 `/login?redirect=...`；
-  - 断言持有普通顾客角色（`ROLE_CUSTOMER`）的用户试图直接输入 URL 访问 `/admin` 时，守卫立即判定权限不足并跳转至商城首页或提示 403；
+  - 断言未登录访客访问受保护的 `/admin` 或 `/cart` 路径时，路由守卫自动截断并重定向至 `/login?redirect=...`；
+  - 断言持有普通顾客角色（`ROLE_CUSTOMER`）的用户试图直接输入 URL 访问 `/admin` 时，守卫立即判定权限不足并跳转至商城首页 `/`；
   - 断言系统管理员角色（`ROLE_ADMIN`）能够顺畅放行进入后台控制台。
 - **Axios 请求与响应拦截测试**（`frontend/test/request.spec.ts`）：
   - 断言发起 API 调用时，请求拦截器（`request.ts`）直接通过 `localStorage.getItem('token')` 读取由 `useUserStore` 登录维护的活跃 JWT，并挂载到 Request Header `satoken: <token>` 中；
-  - 断言当后端返回 `401 Unauthorized` 或 Token 过期时，响应拦截器能自动清理本地持久化 Token（`localStorage.removeItem('token')` 与 `localStorage.removeItem('user')`）并阻止脏状态蔓延。
+  - 断言当非登录业务接口返回业务码 `code === 401`（Token 过期或被踢下线）时，响应拦截器能自动清理本地持久化凭证（`token`、`user` 与 `shop_cart_cache`）并派发 `auth:expired` 事件阻止脏状态蔓延。
 
 ### 6.2 后端认证服务集成测试（Spring Boot Test）
-- **认证服务全覆盖测试**（`backend/src/test/java/com/shop/modules/auth/AuthServiceTest.java`）：
-  - 测试正常注册、重复用户名冲突拦截；
+- **认证服务与控制器覆盖测试**（`AuthServiceTest.java` & `AuthControllerTest.java`）：
+  - 测试正常注册、重复用户名冲突拦截与用户名首尾空格自动裁剪；
   - 测试正确密码登录并断言返回合法 JWT Token 与用户信息；
-  - 测试错误密码登录触发业务异常（返回 401 友好提示）；
-  - 测试注销登录与当前登录人资料查询（`getProfile`）。
+  - 测试错误密码登录触发业务异常（返回 `code=401` 友好提示）；
+  - 测试个人资料与密码修改（`updateProfile`）、管理员用户分页查询与账号启停风控（禁止管理员自锁禁用自身）。

@@ -35,6 +35,10 @@ function loadCachedCart(): CartSummary {
   return { ...EMPTY_CART }
 }
 
+function isCheckableItem(item: CartItem): boolean {
+  return item.productStatus !== 0 && (item.stock === undefined || (item.stock > 0 && item.quantity <= item.stock))
+}
+
 export const useCartStore = defineStore('cart', () => {
   const cartSummary = ref<CartSummary>(loadCachedCart())
   const loading = ref<boolean>(false)
@@ -47,7 +51,8 @@ export const useCartStore = defineStore('cart', () => {
   const checkedCount = computed<number>(() => cartSummary.value.checkedCount || 0)
   const totalAmount = computed<number>(() => cartSummary.value.totalAmount || 0)
   const isAllChecked = computed<boolean>(() => {
-    return items.value.length > 0 && items.value.every((item) => item.checked)
+    const checkable = items.value.filter(isCheckableItem)
+    return checkable.length > 0 && checkable.every((item) => item.checked)
   })
 
   function saveCache(data: CartSummary) {
@@ -65,9 +70,8 @@ export const useCartStore = defineStore('cart', () => {
   async function fetchCart(): Promise<CartSummary> {
     const token = localStorage.getItem('token')
     if (!token) {
-      const empty = { ...EMPTY_CART }
-      saveCache(empty)
-      return empty
+      resetCart()
+      return { ...EMPTY_CART }
     }
 
     loading.value = true
@@ -108,9 +112,13 @@ export const useCartStore = defineStore('cart', () => {
    * 全选或全不选
    */
   async function toggleCheckAll(checked: boolean): Promise<void> {
-    const promises = items.value
-      .filter((item) => item.checked !== checked)
-      .map((item) => updateCartItemApi(item.id, { checked }))
+    const targetItems = items.value.filter((item) => {
+      if (item.checked === checked) return false
+      if (checked && !isCheckableItem(item)) return false
+      return true
+    })
+    if (targetItems.length === 0) return
+    const promises = targetItems.map((item) => updateCartItemApi(item.id, { checked }))
     await Promise.all(promises)
     await fetchCart()
   }
@@ -140,6 +148,21 @@ export const useCartStore = defineStore('cart', () => {
     return result
   }
 
+  function resetCart() {
+    cartSummary.value = { ...EMPTY_CART }
+    try {
+      localStorage.removeItem(CART_CACHE_KEY)
+    } catch {
+      // ignore
+    }
+  }
+
+  // 与请求层和用户状态联动：登录态失效或退出登录时同步清空购物车缓存
+  if (typeof window !== 'undefined') {
+    window.addEventListener('auth:expired', resetCart)
+    window.addEventListener('cart:reset', resetCart)
+  }
+
   return {
     cartSummary,
     loading,
@@ -155,6 +178,7 @@ export const useCartStore = defineStore('cart', () => {
     toggleCheckAll,
     removeItem,
     clearCart,
-    checkout
+    checkout,
+    resetCart
   }
 })

@@ -97,7 +97,7 @@
               :src="row.mainImage"
               fit="cover"
               class="table-thumb"
-              :preview-src-list="[row.mainImage, ...(row.subImages || [])]"
+              :preview-src-list="[row.mainImage, ...(row.subImages || [])].filter(Boolean)"
               preview-teleported
             >
               <template #error>
@@ -309,6 +309,7 @@
               <el-input-number
                 v-model="formData.stock"
                 :min="0"
+                :precision="0"
                 :step="1"
                 class="w-full"
               />
@@ -318,8 +319,8 @@
           <el-col :span="12">
             <el-form-item label="初始状态" prop="status">
               <el-radio-group v-model="formData.status">
-                <el-radio :label="1">立即上架在售</el-radio>
-                <el-radio :label="0">暂存为下架</el-radio>
+                <el-radio :value="1">立即上架在售</el-radio>
+                <el-radio :value="0">暂存为下架</el-radio>
               </el-radio-group>
             </el-form-item>
           </el-col>
@@ -335,8 +336,9 @@
                   <template #append>
                     <el-upload
                       :show-file-list="false"
+                      :before-upload="beforeImageUpload"
                       :http-request="handleUploadMainImage"
-                      accept="image/*"
+                      accept=".jpg,.jpeg,.png,.gif,.webp,.bmp,.ico"
                     >
                       <el-button :icon="Upload">本地上传</el-button>
                     </el-upload>
@@ -373,8 +375,9 @@
 
                 <el-upload
                   :show-file-list="false"
+                  :before-upload="beforeImageUpload"
                   :http-request="handleUploadSubImage"
-                  accept="image/*"
+                  accept=".jpg,.jpeg,.png,.gif,.webp,.bmp,.ico"
                   class="sub-img-uploader"
                 >
                   <div class="upload-trigger-box">
@@ -424,7 +427,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted, nextTick } from 'vue'
 import { ElMessage, type FormInstance, type FormRules, type UploadRequestOptions } from 'element-plus'
 import {
   Plus,
@@ -443,9 +446,10 @@ import {
   type AdminProductQuery,
   type ProductCommand
 } from '@/api/product'
-import { getFeaturedBrandsApi, type Brand } from '@/api/brand'
-import { getPortalCategoryTreeApi, type CategoryNode } from '@/api/category'
+import { getAdminBrandsApi, type Brand } from '@/api/brand'
+import { getAdminCategoryTreeApi, type CategoryNode } from '@/api/category'
 import request from '@/api/request'
+import { beforeImageUpload } from '@/utils/image'
 
 const loading = ref(false)
 const submitLoading = ref(false)
@@ -513,11 +517,25 @@ const flatCategories = computed(() => {
   return result
 })
 
+async function loadAllAdminBrands(): Promise<Brand[]> {
+  const pageSize = 100
+  const firstPage = await getAdminBrandsApi({ page: 1, size: pageSize })
+  const list = [...(firstPage.records || [])]
+  const totalPages = firstPage.pages || 1
+  for (let page = 2; page <= totalPages; page++) {
+    const nextPage = await getAdminBrandsApi({ page, size: pageSize })
+    if (nextPage.records?.length) {
+      list.push(...nextPage.records)
+    }
+  }
+  return list
+}
+
 async function loadMetadata() {
   try {
     const [brands, cats] = await Promise.all([
-      getFeaturedBrandsApi(100),
-      getPortalCategoryTreeApi()
+      loadAllAdminBrands(),
+      getAdminCategoryTreeApi()
     ])
     brandList.value = brands || []
     categoryTree.value = cats || []
@@ -582,6 +600,9 @@ async function handleDelete(id: number) {
   try {
     await deleteProductApi(id)
     ElMessage.success('商品已成功删除')
+    if (productList.value.length === 1 && queryForm.pageNum && queryForm.pageNum > 1) {
+      queryForm.pageNum -= 1
+    }
     fetchProducts()
   } catch (err) {
     console.error('删除商品失败', err)
@@ -604,6 +625,7 @@ function openCreateDialog() {
   subImagesList.value = []
   manualSubImgUrl.value = ''
   dialogVisible.value = true
+  nextTick(() => formRef.value?.clearValidate())
 }
 
 function openEditDialog(row: ProductAdminVO) {
@@ -622,39 +644,36 @@ function openEditDialog(row: ProductAdminVO) {
   subImagesList.value = row.subImages ? [...row.subImages] : []
   manualSubImgUrl.value = ''
   dialogVisible.value = true
+  nextTick(() => formRef.value?.clearValidate())
 }
 
-async function handleUploadMainImage(options: UploadRequestOptions) {
+const handleUploadMainImage = async (options: UploadRequestOptions) => {
+  const url = await uploadImageFile(options.file)
+  if (!url) return
+  formData.mainImage = url
+  formRef.value?.clearValidate('mainImage')
+  ElMessage.success('主图上传成功')
+}
+
+const handleUploadSubImage = async (options: UploadRequestOptions) => {
+  const url = await uploadImageFile(options.file)
+  if (!url) return
+  subImagesList.value.push(url)
+  ElMessage.success('副图添加成功')
+}
+
+/** 上传单张图片到通用上传接口，成功返回可访问 URL，失败返回 null */
+async function uploadImageFile(file: File): Promise<string | null> {
   const form = new FormData()
-  form.append('file', options.file)
+  form.append('file', file)
   try {
     const res = await request.post<any, any>('/api/common/upload', form, {
       headers: { 'Content-Type': 'multipart/form-data' }
     })
-    const url = typeof res === 'string' ? res : (res?.url || res?.data)
-    if (url) {
-      formData.mainImage = url
-      ElMessage.success('主图上传成功')
-    }
+    return (typeof res === 'string' ? res : (res?.url || res?.data)) || null
   } catch (err) {
-    ElMessage.error('图片上传失败，请检查文件格式大小')
-  }
-}
-
-async function handleUploadSubImage(options: UploadRequestOptions) {
-  const form = new FormData()
-  form.append('file', options.file)
-  try {
-    const res = await request.post<any, any>('/api/common/upload', form, {
-      headers: { 'Content-Type': 'multipart/form-data' }
-    })
-    const url = typeof res === 'string' ? res : (res?.url || res?.data)
-    if (url) {
-      subImagesList.value.push(url)
-      ElMessage.success('副图添加成功')
-    }
-  } catch (err) {
-    ElMessage.error('副图上传失败')
+    console.error('图片上传失败', err)
+    return null
   }
 }
 
@@ -721,18 +740,19 @@ onMounted(async () => {
 .title {
   font-size: 20px;
   font-weight: 700;
-  color: #0f172a;
+  color: var(--text);
   margin-bottom: 4px;
 }
 
 .subtitle {
   font-size: 13px;
-  color: #64748b;
+  color: var(--text-3);
 }
 
 .filter-card {
   margin-bottom: 16px;
-  border-radius: 10px;
+  border-radius: 16px;
+  border: 1px solid var(--glass-border);
 }
 
 .filter-form {
@@ -750,14 +770,15 @@ onMounted(async () => {
 }
 
 .table-card {
-  border-radius: 10px;
+  border-radius: 16px;
+  border: 1px solid var(--glass-border);
 }
 
 .table-thumb {
   width: 60px;
   height: 60px;
   border-radius: 6px;
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--line);
 }
 
 .thumb-err {
@@ -766,7 +787,7 @@ onMounted(async () => {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #94a3b8;
+  color: var(--text-4);
   font-size: 11px;
 }
 
@@ -778,13 +799,13 @@ onMounted(async () => {
 
 .prod-name {
   font-weight: 600;
-  color: #1e293b;
+  color: var(--text);
   font-size: 14px;
 }
 
 .prod-sub {
   font-size: 12px;
-  color: #64748b;
+  color: var(--text-3);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -804,20 +825,20 @@ onMounted(async () => {
 }
 
 .price-now {
-  color: #ef4444;
+  color: var(--price);
   font-weight: 700;
   font-size: 15px;
 }
 
 .price-old {
-  color: #94a3b8;
+  color: var(--text-4);
   font-size: 11px;
   text-decoration: line-through;
 }
 
 .time-text {
   font-size: 12px;
-  color: #64748b;
+  color: var(--text-3);
 }
 
 .pagination-wrap {
@@ -845,13 +866,13 @@ onMounted(async () => {
   width: 80px;
   height: 80px;
   border-radius: 6px;
-  border: 1px solid #e2e8f0;
-  background: #f8fafc;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.04);
 }
 
 .preview-tip {
   font-size: 12px;
-  color: #64748b;
+  color: var(--text-3);
 }
 
 /* Sub-Images Gallery styling */
@@ -868,7 +889,7 @@ onMounted(async () => {
   border-radius: 8px;
   position: relative;
   overflow: hidden;
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--line);
 }
 
 .sub-img-thumb {
@@ -890,23 +911,23 @@ onMounted(async () => {
   width: 76px;
   height: 76px;
   border-radius: 8px;
-  border: 1px dashed #cbd5e1;
-  background: #f8fafc;
+  border: 1px dashed var(--line-strong);
+  background: rgba(255, 255, 255, 0.04);
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   gap: 4px;
-  color: #64748b;
+  color: var(--text-3);
   cursor: pointer;
   transition: all 0.2s;
   font-size: 11px;
 }
 
 .upload-trigger-box:hover {
-  border-color: #409eff;
-  color: #409eff;
-  background: #ecf5ff;
+  border-color: var(--violet);
+  color: var(--violet);
+  background: rgba(124, 92, 255, 0.12);
 }
 
 .gallery-manual-add {
